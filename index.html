@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>바이브 데스크 캘린더</title>
+    <!-- PWA 설정 연결 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    
+    <!-- 필수 라이브러리 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; background-color: #020617; color: white; overflow-x: hidden; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+        @keyframes zoom-in { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .animate-in { animation: zoom-in 0.3s ease-out forwards; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- Firebase SDK 모듈식 로드 -->
+    <script type="module">
+        import { initializeApp, deleteApp, getApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+        window.FirebaseSDK = { initializeApp, deleteApp, getApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, getFirestore, collection, doc, setDoc, onSnapshot };
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        // --- 내장 아이콘 컴포넌트 (외부 로드 에러 방지) ---
+        const Icon = ({ name, size = 24, className = "" }) => {
+            const paths = {
+                ChevronLeft: "m15 18-6-6 6-6",
+                ChevronRight: "m9 18 6-6-6-6",
+                Plus: "M12 5v14M5 12h14",
+                Trash2: "M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6",
+                CheckCircle2: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM9 12l2 2 4-4",
+                Circle: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
+                Filter: "M22 3H2l8 9.46V19l4 2v-8.54L22 3z",
+                Palette: "M12 2a10 10 0 0 0-10 10c0 5.5 4.5 10 10 10a2 2 0 0 0 2-2 2 2 0 0 0-2-2c-1.1 0-2-.9-2-2a2 2 0 0 1 2-2h2.5a5.5 5.5 0 0 0 5.5-5.5A5.5 5.5 0 0 0 12 2z",
+                CalendarDays: "M8 2v4M16 2v4M3 10h18M21 6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6z",
+                Bell: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0",
+                X: "M18 6 6 18M6 6l12 12",
+                Cloud: "M17.5 19c3.037 0 5.5-2.463 5.5-5.5 0-2.97-2.354-5.397-5.303-5.497A7.001 7.001 0 0 0 4 10c0 3.866 3.134 7 7 7h6.5",
+                LogIn: "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3",
+                LogOut: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
+                User: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+                Settings: "M12.22 2h-.44a2 2 0 0 0-2 2l-.27 1.1a7.46 7.46 0 0 0-.87.5l-1-.44a2 2 0 0 0-2.32.48l-.31.31a2 2 0 0 0-.48 2.32l.44 1a7.46 7.46 0 0 0-.5.87L4 10.38a2 2 0 0 0-2 2v.44a2 2 0 0 0 2 2l1.1.27c.14.31.31.6.5.87l-.44 1a2 2 0 0 0 .48 2.32l.31.31a2 2 0 0 0 2.32.48l1-.44c.27.19.56.36.87.5l.27 1.1a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2l.27-1.1c.31-.14.6-.31.87-.5l1 .44a2 2 0 0 0 2.32-.48l.31-.31a2 2 0 0 0 .48-2.32l-.44-1c.19-.27.36-.56.5-.87l1.1-.27a2 2 0 0 0 2-2v-.44a2 2 0 0 0-2-2l-1.1-.27a7.46 7.46 0 0 0-.5-.87l.44-1a2 2 0 0 0-.48-2.32l-.31-.31a2 2 0 0 0-2.32-.48l-1 .44a7.46 7.46 0 0 0-.87-.5l-.27-1.1a2 2 0 0 0-2-2zM12 15a3 3 0 1 1 0-6 3 3 0 0 1 0 6z",
+                Save: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8"
+            };
+            return (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                    <path d={paths[name] || ""} />
+                </svg>
+            );
+        };
+
+        // --- 전역 설정 및 테마 ---
+        const HOLIDAYS = {
+            '01-01': '신정', '02-16': '설날 연휴', '02-17': '설날', '02-18': '설날 연휴',
+            '03-01': '삼일절', '05-05': '어린이날', '05-24': '부처님오신날', '05-25': '대체공휴일',
+            '06-06': '현충일', '08-15': '광복절', '09-24': '추석 연휴', '09-25': '추석',
+            '09-26': '추석 연휴', '10-03': '개천절', '10-09': '한글날', '12-25': '기독탄신일'
+        };
+
+        const TAG_COLORS = {
+            '수업': 'bg-blue-500/20 text-blue-300 border border-blue-500/30',
+            '업무': 'bg-red-500/20 text-red-300 border border-red-500/30',
+            '개인': 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
+            '기타': 'bg-purple-500/20 text-purple-300 border border-purple-500/30',
+            '휴일': 'bg-red-500/40 text-white border border-red-500/50',
+            'default': 'bg-slate-600/30 text-slate-300 border border-slate-500/30'
+        };
+
+        const TAG_MULTI_BG = {
+            '수업': 'bg-blue-500/30', '업무': 'bg-red-500/30', '개인': 'bg-emerald-500/30',
+            '기타': 'bg-purple-500/30', '휴일': 'bg-red-500/40', 'default': 'bg-slate-500/30'
+        };
+
+        const TAG_MULTI_BORDER = {
+            '수업': 'border-blue-400', '업무': 'border-red-400', '개인': 'border-emerald-400',
+            '기타': 'border-purple-400', '휴일': 'border-red-400', 'default': 'border-slate-400'
+        };
+
+        const TAG_LIST = ['수업', '업무', '개인', '기타', '휴일'];
+
+        const THEMES = [
+            { id: 'slate', name: '다크 슬레이트', bg: 'bg-slate-950', card: 'bg-slate-900/80', border: 'border-slate-800/50', primary: 'bg-blue-600', hover: 'hover:bg-slate-800' },
+            { id: 'midnight', name: '미드나잇', bg: 'bg-black', card: 'bg-zinc-900/90', border: 'border-zinc-800/50', primary: 'bg-indigo-600', hover: 'hover:bg-zinc-800' },
+            { id: 'forest', name: '딥 포레스트', bg: 'bg-teal-950', card: 'bg-teal-900/60', border: 'border-teal-800/50', hover: 'hover:bg-teal-800/40', primary: 'bg-teal-700' }
+        ];
+
+        function App() {
+            const today = useMemo(() => new Date(), []);
+            const getTodayStr = useCallback(() => `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`, [today]);
+            
+            const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1)); 
+            const [events, setEvents] = useState({});
+            const [addingDate, setAddingDate] = useState(null);
+            const [addingEndDate, setAddingEndDate] = useState(''); 
+            const [inputText, setInputText] = useState('');
+            const [selectedNewTag, setSelectedNewTag] = useState('수업');
+            const [filterTag, setFilterTag] = useState('All');
+            const [currentThemeIdx, setCurrentThemeIdx] = useState(0);
+            const [isRepeatSelected, setIsRepeatSelected] = useState(false);
+            const [repeatDays, setRepeatDays] = useState([]);
+            const [repeatUntil, setRepeatUntil] = useState('');
+            const [autoIncrement, setAutoIncrement] = useState(true);
+            const [showBriefing, setShowBriefing] = useState(true);
+            const [user, setUser] = useState(null);
+            const [isSyncing, setIsSyncing] = useState(false);
+            const [showSettings, setShowSettings] = useState(false);
+            
+            const [fbConfig, setFbConfig] = useState(() => {
+                const saved = localStorage.getItem('custom_firebase_config');
+                return saved ? JSON.parse(saved) : null;
+            });
+
+            const theme = THEMES[currentThemeIdx];
+
+            // --- 날짜 도우미 ---
+            const formatDate = useCallback((y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`, []);
+            
+            const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+            const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+            
+            const getDatesBetween = (s, e) => {
+                const [sy, sm, sd] = s.split('-').map(Number);
+                const [ey, em, ed] = e.split('-').map(Number);
+                let curr = new Date(sy, sm - 1, sd);
+                const last = new Date(ey, em - 1, ed);
+                const result = [];
+                while (curr <= last) {
+                    result.push(formatDate(curr.getFullYear(), curr.getMonth(), curr.getDate()));
+                    curr.setDate(curr.getDate() + 1);
+                }
+                return result;
+            };
+
+            // --- Firebase 로직 ---
+            useEffect(() => {
+                if (!fbConfig || !window.FirebaseSDK) return;
+                const { initializeApp, getAuth, onAuthStateChanged, signInAnonymously, deleteApp, getApp } = window.FirebaseSDK;
+                
+                let currentApp;
+                try {
+                    try { deleteApp(getApp()); } catch (e) {}
+                    currentApp = initializeApp(fbConfig);
+                    const auth = getAuth(currentApp);
+
+                    const unsubAuth = onAuthStateChanged(auth, (currentUser) => {
+                        setUser(currentUser);
+                        if (!currentUser) signInAnonymously(auth).catch(() => {});
+                    });
+                    return () => unsubAuth();
+                } catch (e) { console.error(e); }
+            }, [fbConfig]);
+
+            useEffect(() => {
+                if (!user || !fbConfig || !window.FirebaseSDK) return;
+                const { getFirestore, collection, onSnapshot } = window.FirebaseSDK;
+                const db = getFirestore();
+                const appId = fbConfig.appId || 'default-app';
+                
+                setIsSyncing(true);
+                const daysRef = collection(db, 'artifacts', appId, 'users', user.uid, 'days');
+                const unsubDb = onSnapshot(daysRef, (snapshot) => {
+                    const newEvents = {};
+                    snapshot.forEach(doc => { newEvents[doc.id] = doc.data().items || []; });
+                    setEvents(newEvents);
+                    setIsSyncing(false);
+                }, () => setIsSyncing(false));
+                
+                return () => unsubDb();
+            }, [user, fbConfig]);
+
+            const saveDayToDB = async (dateStr, items) => {
+                if (!user || !fbConfig || !window.FirebaseSDK) return;
+                const { getFirestore, doc, setDoc } = window.FirebaseSDK;
+                const db = getFirestore();
+                const appId = fbConfig.appId || 'default-app';
+                await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'days', dateStr), { items });
+            };
+
+            const handleGoogleLogin = async () => {
+                if (!window.FirebaseSDK) return;
+                const { getAuth, GoogleAuthProvider, signInWithPopup } = window.FirebaseSDK;
+                try {
+                    await signInWithPopup(getAuth(), new GoogleAuthProvider());
+                } catch (e) { alert("로그인 실패: " + e.message); }
+            };
+
+            const handleLogout = async () => {
+                if (!window.FirebaseSDK) return;
+                const { getAuth, signOut } = window.FirebaseSDK;
+                await signOut(getAuth());
+                window.location.reload();
+            };
+
+            const handleSaveConfig = (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                const config = Object.fromEntries(fd.entries());
+                localStorage.setItem('custom_firebase_config', JSON.stringify(config));
+                setFbConfig(config);
+                setShowSettings(false);
+                window.location.reload();
+            };
+
+            // --- 비즈니스 로직 ---
+            const handleAddEvent = (e, dateStr) => {
+                e.preventDefault();
+                if (!inputText.trim()) return;
+
+                if (selectedNewTag === '수업' && isRepeatSelected) {
+                    const [sy, sm, sd] = dateStr.split('-').map(Number);
+                    const [ey, em, ed] = (repeatUntil || dateStr).split('-').map(Number);
+                    let curr = new Date(sy, sm - 1, sd);
+                    const last = new Date(ey, em - 1, ed);
+                    const baseId = Date.now().toString();
+                    let idx = 0;
+                    while (curr <= last) {
+                        if (repeatDays.includes(curr.getDay())) {
+                            const dStr = formatDate(curr.getFullYear(), curr.getMonth(), curr.getDate());
+                            const currentItems = events[dStr] || [];
+                            saveDayToDB(dStr, [...currentItems, { id: `${baseId}-${idx}`, text: inputText, tag: selectedNewTag, completed: false, isMultiDay: false, groupId: `group-${baseId}`, autoIncrement: autoIncrement }]);
+                            idx++;
+                        }
+                        curr.setDate(curr.getDate() + 1);
+                    }
+                } else {
+                    const id = Date.now().toString();
+                    const isMulti = addingEndDate && addingEndDate > dateStr;
+                    const targetDates = isMulti ? getDatesBetween(dateStr, addingEndDate) : [dateStr];
+                    targetDates.forEach((d, i) => {
+                        const state = isMulti ? (i === 0 ? 'start' : i === targetDates.length - 1 ? 'end' : 'middle') : 'none';
+                        const items = events[d] || [];
+                        saveDayToDB(d, [...items, { id, text: inputText, tag: selectedNewTag, completed: false, isMultiDay: isMulti, multiDayState: state }]);
+                    });
+                }
+                setInputText(''); setAddingDate(null); setAddingEndDate('');
+            };
+
+            const toggleEvent = (id) => {
+                Object.keys(events).forEach(d => {
+                    const items = events[d];
+                    if (items.some(ev => ev.id === id)) {
+                        saveDayToDB(d, items.map(ev => ev.id === id ? { ...ev, completed: !ev.completed } : ev));
+                    }
+                });
+            };
+
+            const deleteEvent = (id) => {
+                Object.keys(events).forEach(d => {
+                    const items = events[d];
+                    if (items.some(ev => ev.id === id)) {
+                        saveDayToDB(d, items.filter(ev => ev.id !== id));
+                    }
+                });
+            };
+
+            const handleDragStart = (e, dateStr, id) => { e.dataTransfer.setData('application/json', JSON.stringify({ sourceDate: dateStr, eventId: id })); };
+            const handleDrop = (e, targetDate) => {
+                e.preventDefault();
+                try {
+                    const { sourceDate, eventId } = JSON.parse(e.dataTransfer.getData('application/json'));
+                    if (sourceDate === targetDate) return;
+                    const ev = (events[sourceDate] || []).find(x => x.id === eventId);
+                    if (!ev || ev.isMultiDay) return;
+                    saveDayToDB(sourceDate, events[sourceDate].filter(x => x.id !== eventId));
+                    saveDayToDB(targetDate, [...(events[targetDate] || []), ev]);
+                } catch(err) {}
+            };
+
+            const sessionMap = useMemo(() => {
+                const map = {}; const groupSchedules = {};
+                Object.entries(events).forEach(([d, evs]) => {
+                    if (Array.isArray(evs)) {
+                        evs.forEach(ev => {
+                            if (ev.groupId && ev.autoIncrement) {
+                                if (!groupSchedules[ev.groupId]) groupSchedules[ev.groupId] = [];
+                                groupSchedules[ev.groupId].push({ id: ev.id, date: d });
+                            }
+                        });
+                    }
+                });
+                Object.values(groupSchedules).forEach(gs => {
+                    gs.sort((a, b) => a.date.localeCompare(b.date)).forEach((item, i) => map[item.id] = i + 1);
+                });
+                return map;
+            }, [events]);
+
+            const renderCalendar = () => {
+                const year = currentDate.getFullYear(); const month = currentDate.getMonth();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                const firstDay = new Date(year, month, 1).getDay();
+                const days = [];
+                for (let i = 0; i < firstDay; i++) days.push(<div key={`p-${i}`} className="h-32 bg-white/5 rounded-xl opacity-20"></div>);
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dStr = formatDate(year, month, day);
+                    const dow = new Date(year, month, day).getDay();
+                    const holiday = HOLIDAYS[`${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`];
+                    const dayEvsRaw = events[dStr] || [];
+                    const userHolidays = dayEvsRaw.filter(e => e.tag === '휴일');
+                    const regularEvs = dayEvsRaw.filter(e => e.tag !== '휴일');
+                    const isRed = dow === 0 || holiday || userHolidays.length > 0;
+                    const displayEvs = regularEvs.filter(ev => filterTag === 'All' || ev.tag === filterTag).sort((a,b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0));
+
+                    days.push(
+                        <div key={day} onDragOver={e => e.preventDefault()} onDrop={e => handleDrop(e, dStr)} className={`h-32 p-2 border ${theme.border} ${theme.card} rounded-xl overflow-hidden relative group transition-all hover:bg-white/5`}>
+                            <div className="flex justify-between items-start">
+                                <div className="flex flex-col">
+                                    <span className={`text-sm font-bold ${isRed?'text-red-400':dow===6?'text-blue-400':'text-white/80'} ${dStr === getTodayStr()?'bg-blue-600 px-1.5 rounded-full text-white shadow-lg shadow-blue-500/20':''}`}>{day}</span>
+                                    {holiday && <span className="text-[8px] font-bold text-red-400/80 leading-none">{holiday}</span>}
+                                    {userHolidays.map(h => <span key={h.id} className="text-[8px] font-bold text-red-400/80 leading-none">{h.text}</span>)}
+                                </div>
+                                <button onClick={() => { setAddingDate(dStr); setAddingEndDate(dStr); setRepeatDays([new Date(year, month, day).getDay()]); }} className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white transition-opacity"><Icon name="Plus" size={14}/></button>
+                            </div>
+                            <div className="mt-1 space-y-1 overflow-y-auto custom-scrollbar h-20 pr-1">
+                                {displayEvs.map(ev => {
+                                    const label = (ev.groupId && ev.autoIncrement && sessionMap[ev.id]) ? `${ev.text} (${sessionMap[ev.id]}차시)` : ev.text;
+                                    let barStyle = "bg-black/20 px-1.5 rounded-lg";
+                                    if (ev.isMultiDay) {
+                                        const bg = TAG_MULTI_BG[ev.tag] || TAG_MULTI_BG.default;
+                                        const br = TAG_MULTI_BORDER[ev.tag] || TAG_MULTI_BORDER.default;
+                                        if (ev.multiDayState === 'start') barStyle = `${bg} border-l-2 ${br} ml-0 -mr-4 rounded-l-lg rounded-r-none pr-4 z-10`;
+                                        else if (ev.multiDayState === 'middle') barStyle = `${bg} -mx-4 px-4 rounded-none z-10`;
+                                        else if (ev.multiDayState === 'end') barStyle = `${bg} -ml-4 mr-0 rounded-r-lg rounded-l-none pl-4 z-10`;
+                                    }
+                                    return (
+                                        <div key={ev.id} draggable={!ev.isMultiDay} onDragStart={e => handleDragStart(e, dStr, ev.id)} className={`text-[10px] py-1 flex items-center gap-1 ${barStyle} ${ev.completed?'opacity-40':''}`}>
+                                            <button onClick={() => toggleEvent(ev.id)} className="flex-shrink-0">{ev.completed ? <Icon name="CheckCircle2" size={10} className="text-emerald-400"/> : <Icon name="Circle" size={10} className="text-white/30"/>}</button>
+                                            <span className={`truncate flex-1 ${ev.completed?'line-through text-white/40':'text-white/90'}`}>{label}</span>
+                                            <button onClick={() => deleteEvent(ev.id)} className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-red-400 ml-auto flex-shrink-0"><Icon name="Trash2" size={10}/></button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            {addingDate === dStr && (
+                                <div className="absolute inset-0 bg-slate-900/95 p-2 z-20 flex flex-col gap-2 animate-in rounded-xl">
+                                    <div className="flex flex-wrap gap-1">
+                                        {TAG_LIST.map(t=><button key={t} onClick={()=>setSelectedNewTag(t)} className={`text-[8px] px-1 rounded transition-colors ${selectedNewTag===t?TAG_COLORS[t]:'bg-white/5 text-white/50'}`}>{t}</button>)}
+                                    </div>
+                                    <input autoFocus value={inputText} onChange={e=>setInputText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleAddEvent(e, dStr)} className="bg-transparent border-b border-white/20 text-xs text-white outline-none" placeholder="내용 입력"/>
+                                    {selectedNewTag === '수업' ? (
+                                        <div className="text-[8px] text-white/40 space-y-1">
+                                            <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={isRepeatSelected} onChange={e=>setIsRepeatSelected(e.target.checked)}/> 매주 반복</label>
+                                            {isRepeatSelected && (
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex gap-1">{['일','월','화','수','목','금','토'].map((d,idx) => <button key={idx} onClick={() => setRepeatDays(r => r.includes(idx)?r.filter(x=>x!==idx):[...r,idx])} className={`px-1 rounded ${repeatDays.includes(idx)?'bg-blue-600 text-white':'bg-white/10'}`}>{d}</button>)}</div>
+                                                    <input type="date" value={repeatUntil} onChange={e=>setRepeatUntil(e.target.value)} className="bg-black/40 text-[8px] rounded px-1 text-white"/>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (selectedNewTag !== '휴일' && <div className="flex flex-col gap-1"><span className="text-[8px] text-white/40">장기 일정 종료일</span><input type="date" value={addingEndDate} onChange={e=>setAddingEndDate(e.target.value)} className="bg-black/40 text-[8px] rounded px-1 text-white outline-none"/></div>)}
+                                    <div className="flex gap-1 mt-auto">
+                                        <button onClick={(e)=>handleAddEvent(e, dStr)} className="flex-1 bg-blue-600 text-[10px] py-1 rounded font-bold hover:bg-blue-500">저장</button>
+                                        <button onClick={()=>setAddingDate(null)} className="flex-1 bg-white/10 text-[10px] py-1 rounded hover:bg-white/20">취소</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    );
+                }
+                return days;
+            };
+
+            const weekDays = ['일','월','화','수','목','금','토'];
+            const todaysEvents = useMemo(() => events[getTodayStr()] || [], [events, getTodayStr]);
+
+            return (
+                <div className={`min-h-screen ${theme.bg} p-4 md:p-8 flex items-center justify-center text-white relative overflow-hidden transition-all duration-700`}>
+                    {!fbConfig && (
+                        <div className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-6">
+                            <div className="max-w-md w-full bg-slate-900 p-10 rounded-[3rem] border border-white/10 text-center shadow-2xl">
+                                <Icon name="Settings" size={56} className="mx-auto mb-6 text-blue-400 animate-pulse"/>
+                                <h2 className="text-3xl font-black mb-4 tracking-tighter">프로젝트 설정</h2>
+                                <p className="text-sm text-white/50 mb-10 leading-relaxed">나만의 클라우드 연동을 위해<br/>Firebase 설정 정보를 입력해주세요.</p>
+                                <button onClick={()=>setShowSettings(true)} className="w-full py-5 bg-blue-600 rounded-2xl font-black text-lg shadow-xl hover:bg-blue-500 transition-all">설정 시작하기</button>
+                            </div>
+                        </div>
+                    )}
+                    {showSettings && (
+                        <div className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+                            <form onSubmit={handleSaveConfig} className="max-w-lg w-full bg-slate-900 p-10 rounded-[2.5rem] border border-white/10 shadow-2xl">
+                                <div className="flex justify-between items-center mb-8"><h2 className="text-2xl font-black flex items-center gap-3"><Icon name="Settings" size={24}/> Firebase Config</h2><button type="button" onClick={()=>setShowSettings(false)} className="text-white/30 hover:text-white p-2"><Icon name="X" size={24}/></button></div>
+                                <div className="space-y-4">{['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'].map(k => (
+                                    <div key={k}><label className="text-[10px] uppercase text-white/20 block ml-1 mb-1 font-black tracking-widest">{k}</label><input name={k} defaultValue={fbConfig?.[k] || ''} required className="w-full bg-black/40 border border-white/5 p-3.5 rounded-2xl text-sm outline-none focus:border-blue-500 transition-all shadow-inner text-white"/></div>
+                                ))}</div>
+                                <button type="submit" className="w-full py-5 bg-blue-600 rounded-2xl font-black mt-10 flex items-center justify-center gap-3 shadow-xl hover:bg-blue-500"><Icon name="Save" size={20}/> 설정 저장 및 앱 시작</button>
+                            </form>
+                        </div>
+                    )}
+                    {showBriefing && fbConfig && (
+                        <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                            <div className={`${theme.card} border ${theme.border} p-10 rounded-[3.5rem] shadow-2xl max-w-md w-full animate-in`}>
+                                <div className="flex items-center gap-5 mb-8"><div className={`p-4 rounded-3xl ${theme.primary} text-white shadow-xl`}><Icon name="Bell" size={32}/></div><div><h2 className="text-3xl font-black tracking-tighter">오늘의 브리핑</h2><p className="text-sm text-white/40 font-bold">{today.getMonth()+1}월 {today.getDate()}일</p></div></div>
+                                <div className="space-y-3 mb-10 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+                                    {todaysEvents.length > 0 ? todaysEvents.map(ev => (<div key={ev.id} className="p-4 bg-white/5 rounded-2xl border border-white/5 flex items-center gap-4 group"><div className={`w-3 h-3 rounded-full ${ev.tag==='수업'?'bg-blue-400':'bg-emerald-400'}`}></div><span className="font-bold text-sm tracking-tight truncate text-white/90">{ev.text}</span></div>)) : <div className="text-center py-10 text-white/20 italic font-medium">오늘 잡힌 일정이 없습니다.</div>}
+                                </div>
+                                <button onClick={()=>setShowBriefing(false)} className={`w-full py-5 rounded-3xl ${theme.primary} text-white font-black text-xl shadow-2xl hover:scale-[1.02] active:scale-95 transition-all`}>시작하기</button>
+                            </div>
+                        </div>
+                    )}
+                    <div className={`max-w-7xl w-full h-[92vh] ${theme.card} border ${theme.border} rounded-[3.5rem] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.6)] flex flex-col overflow-hidden backdrop-blur-3xl transition-all duration-700`}>
+                        <div className="p-8 md:p-12 border-b border-white/5 flex items-center justify-between bg-white/5">
+                            <div className="flex items-center gap-8"><h1 className="text-4xl font-black tracking-tighter leading-none text-white">{currentDate.getFullYear()}년 {currentDate.getMonth()+1}월</h1>
+                                <div className="flex gap-3"><button onClick={()=>setShowSettings(true)} className="p-3 bg-white/5 rounded-2xl hover:bg-white/10 text-white/30 hover:text-white transition-all shadow-lg"><Icon name="Settings" size={20}/></button><div className={`px-5 py-2 rounded-full border text-[11px] font-black uppercase tracking-widest flex items-center gap-2 ${isSyncing?'bg-yellow-500/10 border-yellow-500/20 text-yellow-400 animate-pulse':'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}><Icon name="Cloud" size={14}/> {isSyncing?'Syncing':'Live'}</div></div>
+                            </div>
+                            <div className="flex items-center gap-6">{user && !user.isAnonymous ? (
+                                <div className="flex items-center gap-4 pr-6 border-r border-white/10 group"><img src={user.photoURL} referrerPolicy="no-referrer" className="w-12 h-12 rounded-full border-2 border-white/20 shadow-2xl transition-transform group-hover:scale-105"/><div className="flex flex-col"><span className="text-xs font-black text-white/80 max-w-[100px] truncate">{user.displayName || '선생님'}</span><button onClick={handleLogout} className="text-[10px] text-red-400/50 hover:text-red-400 font-black uppercase text-left transition-colors">Logout</button></div></div>
+                            ) : (<button onClick={handleGoogleLogin} className="px-8 py-3.5 bg-blue-600 rounded-[1.25rem] font-black text-sm shadow-2xl hover:bg-blue-500 transition-all active:scale-95">Google Login</button>)}
+                            <div className="flex bg-black/40 p-1.5 rounded-2xl border border-white/5 shadow-inner items-center"><button onClick={prevMonth} className="p-3 text-white/30 hover:text-white transition-all"><Icon name="ChevronLeft" size={24}/></button><div className="w-[1px] h-6 bg-white/10 mx-1"></div><button onClick={nextMonth} className="p-3 text-white/30 hover:text-white transition-all"><Icon name="ChevronRight" size={24}/></button></div>
+                            <button onClick={()=>setCurrentThemeIdx(p=>(p+1)%THEMES.length)} className="p-4 bg-white/5 rounded-2xl text-white/30 hover:text-white shadow-lg transition-all hover:rotate-12"><Icon name="Palette" size={24}/></button>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-7 gap-6 px-12 py-6 bg-black/20 border-b border-white/5 shadow-inner">
+                            {weekDays.map((d,i) => <div key={d} className={`text-center text-[12px] font-black uppercase tracking-[0.3em] ${i===0?'text-red-400/60':i===6?'text-blue-400/60':'text-white/20'}`}>{d}</div>)}
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-8 md:p-12"><div className="grid grid-cols-7 gap-4 md:gap-6 h-full">{renderCalendar()}</div></div>
+                        <div className="px-12 py-4 bg-black/30 border-t border-white/5 flex gap-4 items-center overflow-x-auto no-scrollbar"><Icon name="Filter" size={16} className="text-white/20 flex-shrink-0"/><button onClick={()=>setFilterTag('All')} className={`px-4 py-1.5 rounded-xl text-[10px] font-black transition-all ${filterTag==='All'?'bg-white/10 text-white shadow-lg':'text-white/20 hover:text-white/40'}`}>전체보기</button>
+                            {TAG_LIST.filter(t=>t!=='휴일').map(t => (<button key={t} onClick={()=>setFilterTag(t)} className={`px-4 py-1.5 rounded-xl text-[10px] font-black transition-all ${filterTag===t?TAG_COLORS[t]:'text-white/20 hover:text-white/40'}`}>{t}</button>))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
