@@ -56,7 +56,7 @@
             const [isHolidayMode, setIsHolidayMode] = useState(false);
             const [user, setUser] = useState(null);
 
-            // [핵심 변경] 드래그 애니메이션용 상태
+            // 실시간 드래그 애니메이션용 상태
             const [touchStartX, setTouchStartX] = useState(null);
             const [dragOffset, setDragOffset] = useState(0);
             const [isDragging, setIsDragging] = useState(false);
@@ -210,7 +210,6 @@
                 batch.commit().catch(e => console.error(e));
             };
 
-            // [핵심 변경] 실시간 드래그 앤 스와이프 로직
             const onTouchStart = (e) => {
                 setTouchStartX(e.targetTouches[0].clientX);
                 setIsDragging(true);
@@ -227,7 +226,7 @@
                 } else if (dragOffset < -70) {
                     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
                 }
-                setDragOffset(0); // 고무줄 튕기기
+                setDragOffset(0); 
                 setTouchStartX(null);
             };
 
@@ -332,7 +331,6 @@
                             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => <div key={d}>{d}</div>)}
                         </div>
 
-                        {/* [핵심 변경] 드래그 애니메이션이 적용된 달력 본문 컨테이너 */}
                         <div className="flex-1 px-1 md:px-10 pt-0 overflow-y-auto custom-scrollbar no-drag pb-24 md:pb-10 overflow-x-hidden relative">
                             <div 
                                 onTouchStart={onTouchStart}
@@ -342,7 +340,7 @@
                                 style={{
                                     transform: `translateX(${dragOffset}px)`,
                                     transition: isDragging ? 'none' : 'transform 0.25s ease-out',
-                                    touchAction: 'pan-y' // 상하 스크롤은 허용, 좌우 기본 스와이프는 차단
+                                    touchAction: 'pan-y'
                                 }}
                             >
                                 {renderDays()}
