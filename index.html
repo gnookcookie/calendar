@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>바이브 캘린더 Pro - 렌더링 최적화</title>
+    <title>바이브 캘린더 Pro - 궁극의 최적화</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -60,7 +60,6 @@
             const theme = THEMES[currentThemeIdx];
             const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
 
-            // 마우스 통과 설정
             useEffect(() => {
                 if (!isElectron) return;
                 const { ipcRenderer } = window.require('electron');
@@ -73,7 +72,6 @@
                 return () => window.removeEventListener('mousemove', handleMove);
             }, []);
 
-            // Firebase 동기화
             useEffect(() => {
                 if (!fbConfig || !window.FirebaseSDK) return;
                 const { initializeApp, getAuth, onAuthStateChanged, signInAnonymously, getFirestore, collection, onSnapshot } = window.FirebaseSDK;
@@ -97,23 +95,22 @@
                 });
             }, [fbConfig]);
 
-            // [핵심 최적화] 차시를 미리 한 번만 계산하여 '장부(Map)'에 기록해둡니다.
+            // 캐싱된 차시 맵
             const sessionMap = useMemo(() => {
                 const map = {};
-                const counts = {}; // { '수업명': 누적차시 }
-                const sortedDates = Object.keys(events).sort(); // 과거부터 순차적으로
-                
+                const counts = {};
+                const sortedDates = Object.keys(events).sort();
                 for (const date of sortedDates) {
                     const dayEvents = events[date] || [];
                     for (const ev of dayEvents) {
                         if (ev.tag === '수업') {
                             counts[ev.text] = (counts[ev.text] || 0) + 1;
-                            map[ev.id] = counts[ev.text]; // 이벤트 ID별로 몇 차시인지 저장
+                            map[ev.id] = counts[ev.text];
                         }
                     }
                 }
                 return map;
-            }, [events]); // 데이터(events)가 바뀔 때만 다시 계산합니다.
+            }, [events]);
 
             const saveToDB = async (dateStr, data) => {
                 if (!user) return;
@@ -121,13 +118,12 @@
                 await setDoc(doc(getFirestore(), 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dateStr), data, { merge: true });
             };
 
+            // 낙관적 업데이트가 적용된 초고속 저장
             const handleSave = async () => {
                 if (!inputText || !user) return;
-                
                 const { getFirestore, doc, writeBatch } = window.FirebaseSDK;
                 const db = getFirestore();
                 const batch = writeBatch(db);
-
                 const optimisticEvents = { ...events };
 
                 if (isHolidayMode) {
@@ -145,13 +141,9 @@
 
                         if (!endDate || isEveryday || isMatchingDay) {
                             const newItem = { id: Date.now() + Math.random(), text: inputText, tag: selectedTag, completed: false };
-                            const currentItems = optimisticEvents[dStr] || [];
-                            const newItems = [...currentItems, newItem];
-                            
-                            optimisticEvents[dStr] = newItems;
-                            
+                            optimisticEvents[dStr] = [...(optimisticEvents[dStr] || []), newItem];
                             const ref = doc(db, 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dStr);
-                            batch.set(ref, { items: newItems }, { merge: true });
+                            batch.set(ref, { items: optimisticEvents[dStr] }, { merge: true });
                         }
                         curr.setDate(curr.getDate() + 1);
                     }
@@ -159,15 +151,30 @@
                 
                 setEvents(optimisticEvents); 
                 setAddingDate(null); setInputText(''); setEndDate(''); setRepeatDays([]); setIsHolidayMode(false);
-
-                try { await batch.commit(); } catch (error) { console.error("저장 실패:", error); }
+                try { await batch.commit(); } catch (e) { console.error(e); }
             };
 
-            const toggleComplete = async (dateStr, eventId) => {
-                const updatedItems = events[dateStr].map(item => item.id === eventId ? { ...item, completed: !item.completed } : item);
+            // [핵심 변경] 낙관적 업데이트가 적용된 삭제 로직 (즉각 반응)
+            const handleDelete = async (dateStr, eventId) => {
+                // 1. 화면에서 먼저 지웁니다.
+                const updatedItems = events[dateStr].filter(i => i.id !== eventId);
+                setEvents(prev => ({ ...prev, [dateStr]: updatedItems }));
+
+                // 2. 뒤에서 조용히 DB와 동기화합니다.
                 await saveToDB(dateStr, { items: updatedItems });
             };
 
+            // [핵심 변경] 낙관적 업데이트가 적용된 체크박스 완료 로직 (즉각 반응)
+            const toggleComplete = async (dateStr, eventId) => {
+                // 1. 화면에서 먼저 줄을 긋습니다.
+                const updatedItems = events[dateStr].map(item => item.id === eventId ? { ...item, completed: !item.completed } : item);
+                setEvents(prev => ({ ...prev, [dateStr]: updatedItems }));
+
+                // 2. 뒤에서 조용히 DB와 동기화합니다.
+                await saveToDB(dateStr, { items: updatedItems });
+            };
+
+            // 낙관적 업데이트가 적용된 드래그 앤 드롭
             const handleDragStart = (e, dateStr, item) => {
                 e.dataTransfer.setData("item", JSON.stringify(item));
                 e.dataTransfer.setData("fromDate", dateStr);
@@ -232,7 +239,8 @@
                                         <span className={`truncate flex-1 ${ev.completed ? 'line-through' : ''}`}>
                                             {ev.text} {ev.tag === '수업' ? `(${sessionMap[ev.id] || ''}차시)` : ''}
                                         </span>
-                                        <button onClick={async () => await saveToDB(dStr, { items: events[dStr].filter(i => i.id !== ev.id) })} className="ml-1 opacity-100 md:opacity-0 group-hover/ev:opacity-100 no-drag p-1">×</button>
+                                        {/* [적용] X 버튼을 누르면 handleDelete가 실행됩니다. */}
+                                        <button onClick={() => handleDelete(dStr, ev.id)} className="ml-1 opacity-100 md:opacity-0 group-hover/ev:opacity-100 no-drag p-1">×</button>
                                     </div>
                                 ))}
                             </div>
@@ -356,6 +364,15 @@
                                     {['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'].map(k => (
                                         <input key={k} name={k} placeholder={k} defaultValue={fbConfig?.[k] || ''} className="w-full bg-black/40 border border-white/10 p-3 rounded-xl mb-2 text-xs text-white outline-none"/>
                                     ))}
+                                    <div className="md:hidden mt-6 mb-2 border-t border-white/10 pt-4">
+                                        <span className="text-white/40 text-xs font-bold mb-2 block">테마 & 투명도</span>
+                                        <div className="flex gap-2 mb-4">
+                                            {THEMES.map((t, idx) => (
+                                                <button type="button" key={t.id} onClick={() => setCurrentThemeIdx(idx)} className={`flex-1 py-2 rounded-lg text-xs font-bold ${currentThemeIdx === idx ? 'bg-blue-600 text-white' : 'bg-white/10 text-white/50'}`}>{t.id}</button>
+                                            ))}
+                                        </div>
+                                        <input type="range" min="0.1" max="1" step="0.05" value={opacity} onChange={e => setOpacity(e.target.value)} className="w-full accent-blue-600"/>
+                                    </div>
                                     <button type="submit" className="w-full py-4 bg-blue-600 rounded-xl font-black text-white mt-4">저장 및 동기화</button>
                                 </form>
                             </div>
