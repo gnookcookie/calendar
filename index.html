@@ -3,29 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>바이브 데스크 캘린더</title>
+    <title>교사용 바이브 캘린더</title>
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#0f172a">
-    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; background-color: #020617; color: white; overflow-x: hidden; }
         
-        /* 스크롤바 디자인 */
+        /* [중요] 바탕화면 아이콘이 보이도록 배경을 완전히 투명하게 설정 */
+        body, html { 
+            font-family: 'Inter', sans-serif; 
+            margin: 0; padding: 0; 
+            background: transparent !important; 
+            overflow: hidden; 
+            height: 100vh; 
+        }
+        #root { height: 100%; background: transparent; }
+        
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
         
-        /* 애니메이션 */
-        @keyframes zoom-in { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-        .animate-in { animation: zoom-in 0.3s ease-out forwards; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
+        /* 드래그 영역 설정 */
+        .drag { -webkit-app-region: drag; }
+        .no-drag { -webkit-app-region: no-drag !important; }
+
+        /* 크기 조절 모드일 때 마우스로 잡기 편하도록 파란색 가이드라인 표시 */
+        .resize-active { 
+            border: 3px solid rgba(59, 130, 246, 0.6) !important;
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+        }
     </style>
 </head>
 <body>
@@ -35,161 +43,54 @@
         import { initializeApp, deleteApp, getApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-
         window.FirebaseSDK = { initializeApp, deleteApp, getApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, getFirestore, collection, doc, setDoc, onSnapshot };
     </script>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo, useCallback } = React;
 
-        // --- 내장 아이콘 (SVG 직접 구현) ---
+        // --- 내장 아이콘 (SVG) ---
         const Icon = ({ name, size = 24, className = "" }) => {
             const paths = {
-                ChevronLeft: "m15 18-6-6 6-6",
-                ChevronRight: "m9 18 6-6-6-6",
-                Plus: "M12 5v14M5 12h14",
-                Trash2: "M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6",
+                ChevronLeft: "m15 18-6-6 6-6", ChevronRight: "m9 18 6-6-6-6", Plus: "M12 5v14M5 12h14",
+                Trash2: "M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6", Palette: "M12 21a9 9 0 1 1 0-18c2.04 0 3.92.79 5.33 2.1a9.03 9.03 0 0 1 1.54 2.14",
+                Settings: "M12.22 2h-.44a2 2 0 0 0-2 2l-.27 1.1a7.46 7.46 0 0 0-.87.5", Maximize: "M8 3H5a2 2 0 0 0-2 2v3m11-5h3a2 2 0 0 1 2 2v3m0 8v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3",
                 CheckCircle2: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM9 12l2 2 4-4",
-                Circle: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
-                Filter: "M22 3H2l8 9.46V19l4 2v-8.54L22 3z",
-                Palette: "M12 2a10 10 0 0 0-10 10c0 5.5 4.5 10 10 10a2 2 0 0 0 2-2 2 2 0 0 0-2-2c-1.1 0-2-.9-2-2a2 2 0 0 1 2-2h2.5a5.5 5.5 0 0 0 5.5-5.5A5.5 5.5 0 0 0 12 2z",
-                Bell: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0",
-                X: "M18 6 6 18M6 6l12 12",
-                Cloud: "M17.5 19c3.037 0 5.5-2.463 5.5-5.5 0-2.97-2.354-5.397-5.303-5.497A7.001 7.001 0 0 0 4 10c0 3.866 3.134 7 7 7h6.5",
-                Settings: "M12.22 2h-.44a2 2 0 0 0-2 2l-.27 1.1a7.46 7.46 0 0 0-.87.5l-1-.44a2 2 0 0 0-2.32.48l-.31.31a2 2 0 0 0-.48 2.32l.44 1a7.46 7.46 0 0 0-.5.87L4 10.38a2 2 0 0 0-2 2v.44a2 2 0 0 0 2 2l1.1.27c.14.31.31.6.5.87l-.44 1a2 2 0 0 0 .48 2.32l.31.31a2 2 0 0 0 2.32.48l1-.44c.27.19.56.36.87.5l.27 1.1a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2l.27-1.1c.31-.14.6-.31.87-.5l1 .44a2 2 0 0 0 2.32-.48l.31-.31a2 2 0 0 0 .48-2.32l-.44-1c.19-.27.36-.56.5-.87l1.1-.27a2 2 0 0 0 2-2v-.44a2 2 0 0 0-2-2l-1.1-.27a7.46 7.46 0 0 0-.5-.87l.44-1a2 2 0 0 0-.48-2.32l-.31-.31a2 2 0 0 0-2.32-.48l-1 .44a7.46 7.46 0 0 0-.87-.5l-.27-1.1a2 2 0 0 0-2-2zM12 15a3 3 0 1 1 0-6 3 3 0 0 1 0 6z",
-                Save: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8",
-                Maximize: "M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"
+                Circle: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"
             };
-            return (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                    <path d={paths[name] || ""} />
-                </svg>
-            );
+            return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d={paths[name] || ""} /></svg>;
         };
 
-        // --- 상수 및 테마 ---
-        const HOLIDAYS = {
-            '01-01': '신정', '02-16': '설날 연휴', '02-17': '설날', '02-18': '설날 연휴',
-            '03-01': '삼일절', '05-05': '어린이날', '05-24': '부처님오신날', '05-25': '대체공휴일',
-            '06-06': '현충일', '08-15': '광복절', '09-24': '추석 연휴', '09-25': '추석',
-            '09-26': '추석 연휴', '10-03': '개천절', '10-09': '한글날', '12-25': '기독탄신일'
-        };
-
-        const TAG_COLORS = {
-            '수업': 'bg-blue-500/20 text-blue-300 border border-blue-500/30',
-            '업무': 'bg-red-500/20 text-red-300 border border-red-500/30',
-            '개인': 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
-            '기타': 'bg-purple-500/20 text-purple-300 border border-purple-500/30',
-            '휴일': 'bg-red-500/40 text-white border border-red-500/50',
-            'default': 'bg-slate-600/30 text-slate-300 border border-slate-500/30'
-        };
-
+        // --- 테마 설정 ---
         const THEMES = [
-            { id: 'slate', name: '다크 슬레이트', bg: 'bg-slate-950', card: 'bg-slate-900/80', border: 'border-slate-800/50', primary: 'bg-blue-600', hover: 'hover:bg-slate-800' },
-            { id: 'midnight', name: '미드나잇', bg: 'bg-black', card: 'bg-zinc-900/90', border: 'border-zinc-800/50', primary: 'bg-indigo-600', hover: 'hover:bg-zinc-800' }
+            { id: 'slate', name: '다크 슬레이트', bg: 'bg-slate-900/80', border: 'border-slate-800/50', primary: 'bg-blue-600' },
+            { id: 'midnight', name: '미드나잇 블랙', bg: 'bg-zinc-950/90', border: 'border-zinc-800/50', primary: 'bg-indigo-600' },
+            { id: 'ocean', name: '딥 오션', bg: 'bg-blue-950/80', border: 'border-blue-900/50', primary: 'bg-cyan-600' }
         ];
 
         function App() {
             const today = useMemo(() => new Date(), []);
-            const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1)); 
-            const [events, setEvents] = useState({});
-            const [addingDate, setAddingDate] = useState(null);
-            const [inputText, setInputText] = useState('');
-            const [selectedNewTag, setSelectedNewTag] = useState('수업');
-            const [filterTag, setFilterTag] = useState('All');
+            const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
             const [currentThemeIdx, setCurrentThemeIdx] = useState(0);
-            const [showBriefing, setShowBriefing] = useState(true);
-            const [user, setUser] = useState(null);
-            const [isSyncing, setIsSyncing] = useState(false);
-            const [showSettings, setShowSettings] = useState(false);
             const [isResizable, setIsResizable] = useState(false);
-
+            const [showSettings, setShowSettings] = useState(false);
+            const [events, setEvents] = useState({});
+            
             const savedConfig = localStorage.getItem('custom_firebase_config');
             const [fbConfig, setFbConfig] = useState(savedConfig ? JSON.parse(savedConfig) : null);
             const theme = THEMES[currentThemeIdx];
 
-            // --- 날짜 도우미 ---
-            const formatDate = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-            const getTodayStr = () => formatDate(today.getFullYear(), today.getMonth(), today.getDate());
-            const getYear = () => currentDate.getFullYear();
-            const getMonth = () => currentDate.getMonth();
-            const prevMonth = () => setCurrentDate(new Date(getYear(), getMonth() - 1, 1));
-            const nextMonth = () => setCurrentDate(new Date(getYear(), getMonth() + 1, 1));
+            // 일렉트론 환경인지 확인
+            const isElectron = window.process && window.process.type === 'renderer';
 
-            // --- Electron 창 제어 ---
+            // 창 조절 모드 토글
             const toggleResizeMode = () => {
                 const nextState = !isResizable;
                 setIsResizable(nextState);
-                if (window.process && window.process.type === 'renderer') {
-                    try {
-                        const { ipcRenderer } = window.require('electron');
-                        ipcRenderer.send('set-resizable', nextState);
-                    } catch (e) { console.warn("Electron 연동 실패"); }
+                if (isElectron) {
+                    const { ipcRenderer } = window.require('electron');
+                    ipcRenderer.send('set-resizable', nextState);
                 }
-            };
-
-            // --- Firebase 로직 ---
-            useEffect(() => {
-                if (!fbConfig || !window.FirebaseSDK) return;
-                const { initializeApp, getAuth, onAuthStateChanged, signInAnonymously, deleteApp, getApp } = window.FirebaseSDK;
-                try {
-                    try { deleteApp(getApp()); } catch (e) {}
-                    const app = initializeApp(fbConfig);
-                    const auth = getAuth(app);
-                    return onAuthStateChanged(auth, (currentUser) => {
-                        setUser(currentUser);
-                        if (!currentUser) signInAnonymously(auth).catch(() => {});
-                    });
-                } catch (e) { console.error(e); }
-            }, [fbConfig]);
-
-            useEffect(() => {
-                if (!user || !fbConfig || !window.FirebaseSDK) return;
-                const { getFirestore, collection, onSnapshot } = window.FirebaseSDK;
-                const db = getFirestore();
-                const appId = fbConfig.appId || 'default-app';
-                setIsSyncing(true);
-                const unsub = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'days'), (snap) => {
-                    const newEvs = {};
-                    snap.forEach(doc => { newEvs[doc.id] = doc.data().items || []; });
-                    setEvents(newEvs);
-                    setIsSyncing(false);
-                }, () => setIsSyncing(false));
-                return () => unsub();
-            }, [user, fbConfig]);
-
-            const saveDayToDB = async (dateStr, items) => {
-                if (!user || !fbConfig || !window.FirebaseSDK) return;
-                const { getFirestore, doc, setDoc } = window.FirebaseSDK;
-                const appId = fbConfig.appId || 'default-app';
-                await setDoc(doc(getFirestore(), 'artifacts', appId, 'users', user.uid, 'days', dateStr), { items });
-            };
-
-            const handleAddEvent = (e, dateStr) => {
-                e.preventDefault();
-                if (!inputText.trim()) return;
-                const id = Date.now().toString();
-                const currentItems = events[dateStr] || [];
-                saveDayToDB(dateStr, [...currentItems, { id, text: inputText, tag: selectedNewTag, completed: false }]);
-                setInputText(''); setAddingDate(null);
-            };
-
-            const toggleEvent = (id) => {
-                Object.keys(events).forEach(d => {
-                    const items = events[d];
-                    if (items.some(ev => ev.id === id)) {
-                        saveDayToDB(d, items.map(ev => ev.id === id ? { ...ev, completed: !ev.completed } : ev));
-                    }
-                });
-            };
-
-            const deleteEvent = (id) => {
-                Object.keys(events).forEach(d => {
-                    const items = events[d];
-                    if (items.some(ev => ev.id === id)) {
-                        saveDayToDB(d, items.filter(ev => ev.id !== id));
-                    }
-                });
             };
 
             const handleSaveConfig = (e) => {
@@ -198,117 +99,92 @@
                 const config = Object.fromEntries(fd.entries());
                 localStorage.setItem('custom_firebase_config', JSON.stringify(config));
                 setFbConfig(config);
-                setShowSettings(false);
                 window.location.reload();
             };
 
-            const renderCalendar = () => {
-                const year = getYear(); const month = getMonth();
+            // --- 달력 렌더링 도우미 ---
+            const renderCalendarDays = () => {
+                const year = currentDate.getFullYear();
+                const month = currentDate.getMonth();
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
                 const firstDay = new Date(year, month, 1).getDay();
-                const days = [];
-                for (let i = 0; i < firstDay; i++) days.push(<div key={`p-${i}`} className="h-32 bg-white/5 rounded-xl opacity-10"></div>);
-                for (let day = 1; day <= daysInMonth; day++) {
-                    const dStr = formatDate(year, month, day);
-                    const dow = new Date(year, month, day).getDay();
-                    const dayEvs = events[dStr] || [];
-                    const isToday = dStr === getTodayStr();
-                    const holiday = HOLIDAYS[`${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`];
-                    const isRed = dow === 0 || holiday || dayEvs.some(e => e.tag === '휴일');
-
-                    days.push(
-                        <div key={day} className={`h-32 p-2 border ${theme.border} ${theme.card} rounded-xl overflow-hidden relative group transition-all hover:bg-white/5`}>
-                            <div className="flex justify-between items-start">
-                                <div className="flex flex-col">
-                                    <span className={`text-sm font-bold ${isRed?'text-red-400':dow===6?'text-blue-400':'text-white/80'} ${isToday?'bg-blue-600 px-1.5 rounded-full text-white':''}`}>{day}</span>
-                                    {holiday && <span className="text-[8px] font-bold text-red-400/80 leading-none">{holiday}</span>}
-                                </div>
-                                <button onClick={() => setAddingDate(dStr)} className="opacity-0 group-hover:opacity-100 text-white/40 -webkit-app-region-no-drag" style={{ WebkitAppRegion: 'no-drag' }}><Icon name="Plus" size={14}/></button>
-                            </div>
-                            <div className="mt-1 space-y-1 overflow-y-auto custom-scrollbar h-20" style={{ WebkitAppRegion: 'no-drag' }}>
-                                {dayEvs.filter(ev => filterTag === 'All' || ev.tag === filterTag).map(ev => (
-                                    <div key={ev.id} className={`text-[10px] p-1 rounded flex items-center gap-1 ${TAG_COLORS[ev.tag] || TAG_COLORS.default} ${ev.completed?'opacity-40 line-through':''}`}>
-                                        <button onClick={() => toggleEvent(ev.id)}>{ev.completed ? <Icon name="CheckCircle2" size={10}/> : <Icon name="Circle" size={10}/>}</button>
-                                        <span className="truncate flex-1">{ev.text}</span>
-                                        <button onClick={() => deleteEvent(ev.id)} className="opacity-0 group-hover:opacity-100"><Icon name="Trash2" size={10}/></button>
-                                    </div>
-                                ))}
-                            </div>
-                            {addingDate === dStr && (
-                                <div className="absolute inset-0 bg-slate-900/95 p-2 z-20 flex flex-col gap-2 rounded-xl" style={{ WebkitAppRegion: 'no-drag' }}>
-                                    <input autoFocus value={inputText} onChange={e=>setInputText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleAddEvent(e, dStr)} className="bg-transparent border-b border-white/20 text-xs text-white outline-none" placeholder="입력 후 엔터"/>
-                                    <div className="flex flex-wrap gap-1">
-                                        {Object.keys(TAG_COLORS).filter(t=>t!=='default').map(t=><button key={t} onClick={()=>setSelectedNewTag(t)} className={`text-[8px] px-1 rounded ${selectedNewTag===t?TAG_COLORS[t]:'bg-white/10'}`}>{t}</button>)}
-                                    </div>
-                                    <button onClick={()=>setAddingDate(null)} className="text-[8px] text-white/40 mt-auto">닫기</button>
-                                </div>
-                            )}
+                const cells = [];
+                
+                for (let i = 0; i < firstDay; i++) cells.push(<div key={`p-${i}`} className="h-full bg-white/5 rounded-2xl opacity-5"></div>);
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                    const isToday = dateStr === `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+                    cells.push(
+                        <div key={d} className={`h-full min-h-[100px] p-3 border ${theme.border} bg-white/5 rounded-2xl relative group hover:bg-white/10 transition-all`}>
+                            <span className={`text-sm font-black ${isToday ? 'bg-blue-600 px-2 py-0.5 rounded-full text-white' : 'text-white/60'}`}>{d}</span>
                         </div>
                     );
                 }
-                return days;
+                return cells;
             };
 
             return (
-                <div className={`min-h-screen ${theme.bg} p-4 md:p-8 flex items-center justify-center text-white relative`}>
-                    {!fbConfig && (
-                        <div className="fixed inset-0 z-[100] bg-slate-950 flex items-center justify-center p-6 text-center">
-                            <button onClick={()=>setShowSettings(true)} className="px-10 py-5 bg-blue-600 rounded-2xl font-black text-xl shadow-2xl">Firebase 연결 시작</button>
-                        </div>
-                    )}
-
+                <div className="h-screen w-screen p-6 flex items-center justify-center bg-transparent">
+                    {/* 설정 모달 */}
                     {showSettings && (
-                        <div className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-                            <form onSubmit={handleSaveConfig} className="max-w-lg w-full bg-slate-900 p-8 rounded-3xl border border-white/10 shadow-2xl" style={{ WebkitAppRegion: 'no-drag' }}>
-                                <h2 className="text-xl font-bold mb-6 flex items-center gap-2"><Icon name="Settings" size={20}/> Firebase Config</h2>
+                        <div className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+                            <form onSubmit={handleSaveConfig} className="max-w-md w-full bg-slate-900 p-8 rounded-[2.5rem] border border-white/10 no-drag">
+                                <h2 className="text-2xl font-black mb-6 text-white tracking-tighter">Firebase 연결</h2>
                                 {['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'].map(k => (
-                                    <div key={k} className="mb-3">
-                                        <label className="text-[10px] uppercase text-white/30 block ml-1 mb-1">{k}</label>
-                                        <input name={k} defaultValue={fbConfig?.[k] || ''} required className="w-full bg-black/40 border border-white/5 p-3 rounded-xl text-sm outline-none focus:border-blue-500 text-white"/>
-                                    </div>
+                                    <input key={k} name={k} placeholder={k} defaultValue={fbConfig?.[k] || ''} className="w-full bg-black/40 border border-white/10 p-3 mb-2 rounded-2xl text-sm text-white outline-none focus:border-blue-500"/>
                                 ))}
-                                <button type="submit" className="w-full py-4 bg-blue-600 rounded-2xl font-bold mt-4">저장 및 시작</button>
-                                <button type="button" onClick={()=>setShowSettings(false)} className="w-full text-white/30 text-sm mt-4">닫기</button>
+                                <button type="submit" className="w-full py-4 bg-blue-600 rounded-2xl font-black mt-4 text-white shadow-xl">설정 저장 및 새로고침</button>
+                                <button type="button" onClick={()=>setShowSettings(false)} className="w-full text-white/30 text-xs mt-4">닫기</button>
                             </form>
                         </div>
                     )}
 
-                    <div className={`max-w-7xl w-full h-[92vh] ${theme.card} border ${theme.border} rounded-[3rem] shadow-2xl flex flex-col overflow-hidden backdrop-blur-3xl transition-all duration-700 ${isResizable ? 'ring-4 ring-blue-500/50' : ''}`}>
+                    {/* 메인 캘린더 컨테이너 */}
+                    <div className={`w-full h-full flex flex-col rounded-[3.5rem] shadow-2xl transition-all duration-500 overflow-hidden border-2 backdrop-blur-xl 
+                        ${theme.bg} ${theme.border} ${isResizable ? 'resize-active' : ''}`}>
                         
-                        {/* 헤더 영역: 드래그 가능 */}
-                        <div style={{ WebkitAppRegion: 'drag' }} className="p-6 md:p-10 border-b border-white/5 flex items-center justify-between cursor-move">
-                            <div className="flex items-center gap-6" style={{ WebkitAppRegion: 'no-drag' }}>
-                                <h1 className="text-3xl md:text-4xl font-black tracking-tighter">{getYear()}년 {getMonth()+1}월</h1>
+                        {/* 헤더: 드래그 영역 */}
+                        <div className="drag p-8 md:p-10 flex items-center justify-between bg-white/5 cursor-move">
+                            <div className="no-drag flex items-center gap-6">
+                                <h1 className="text-4xl font-black text-white tracking-tighter">
+                                    {currentDate.getFullYear()}년 {currentDate.getMonth()+1}월
+                                </h1>
                                 <div className="flex gap-2">
-                                    <button onClick={()=>setShowSettings(true)} className="p-3 bg-white/5 rounded-xl text-white/30 hover:text-white"><Icon name="Settings" size={18}/></button>
-                                    
-                                    { (window.process && window.process.type === 'renderer') && (
-                                        <button onClick={toggleResizeMode} className={`p-2.5 px-4 rounded-xl flex items-center gap-2 transition-all font-bold text-xs ${isResizable ? 'bg-blue-600' : 'bg-white/5 text-white/30'}`}>
-                                            <Icon name="Maximize" size={16}/> {isResizable ? '조절 중' : '크기 고정'}
+                                    <button onClick={()=>setShowSettings(true)} className="p-3 bg-white/5 rounded-2xl text-white/40 hover:text-white transition-all shadow-lg"><Icon name="Settings" size={20}/></button>
+                                    {isElectron && (
+                                        <button 
+                                            onClick={toggleResizeMode} 
+                                            className={`p-3 px-5 rounded-2xl flex items-center gap-3 transition-all font-black text-xs shadow-lg ${isResizable ? 'bg-blue-600 text-white animate-pulse' : 'bg-white/10 text-white/40 hover:text-white'}`}
+                                        >
+                                            <Icon name="Maximize" size={18}/> 
+                                            {isResizable ? '조절 중... (모서리 드래그)' : '크기 조절'}
                                         </button>
                                     )}
-                                    
-                                    <div className="px-4 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[10px] font-bold text-emerald-400 flex items-center gap-2">
-                                        <Icon name="Cloud" size={12}/> {isSyncing ? '동기화 중' : '연결됨'}
-                                    </div>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-4" style={{ WebkitAppRegion: 'no-drag' }}>
-                                <div className="flex bg-black/40 p-1 rounded-2xl border border-white/5 shadow-inner">
-                                    <button onClick={prevMonth} className="p-3 text-white/30 hover:text-white"><Icon name="ChevronLeft" size={24}/></button>
-                                    <button onClick={nextMonth} className="p-3 text-white/30 hover:text-white"><Icon name="ChevronRight" size={24}/></button>
+
+                            <div className="no-drag flex items-center gap-4">
+                                {/* 테마 변경 버튼: 클릭 시 THEMES 배열 순환 */}
+                                <button onClick={()=>setCurrentThemeIdx(p=>(p+1)%THEMES.length)} className="p-4 bg-white/5 rounded-3xl text-white/40 hover:text-white transition-all shadow-lg border border-white/5">
+                                    <Icon name="Palette" size={26} />
+                                </button>
+                                <div className="flex bg-black/40 rounded-3xl p-1.5 shadow-inner border border-white/5">
+                                    <button onClick={()=>setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1))} className="p-3 text-white/30 hover:text-white"><Icon name="ChevronLeft" size={28}/></button>
+                                    <div className="w-[1px] h-6 bg-white/10 self-center"></div>
+                                    <button onClick={()=>setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1))} className="p-3 text-white/30 hover:text-white"><Icon name="ChevronRight" size={28}/></button>
                                 </div>
-                                <button onClick={()=>setCurrentThemeIdx(p=>(p+1)%THEMES.length)} className="p-3 bg-white/5 rounded-2xl text-white/30 hover:text-white"><Icon name="Palette" size={24}/></button>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-7 gap-4 px-10 py-6 bg-black/20 text-center text-[11px] font-black uppercase text-white/20">
-                            {['일','월','화','수','목','금','토'].map(d => <div key={d}>{d}</div>)}
+                        {/* 요일 헤더 */}
+                        <div className="grid grid-cols-7 gap-4 px-10 py-6 bg-black/10 text-center text-[11px] font-black uppercase tracking-[0.2em] text-white/20">
+                            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => <div key={d}>{d}</div>)}
                         </div>
 
-                        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-10" style={{ WebkitAppRegion: 'no-drag' }}>
-                            <div className="grid grid-cols-7 gap-4 md:gap-6">
-                                {renderCalendar()}
+                        {/* 달력 날짜 영역: 창 크기에 따라 유동적으로 크기 조절 */}
+                        <div className="flex-1 p-8 md:p-10 overflow-y-auto custom-scrollbar no-drag">
+                            <div className="grid grid-cols-7 gap-4 md:gap-6 h-full">
+                                {renderCalendarDays()}
                             </div>
                         </div>
                     </div>
