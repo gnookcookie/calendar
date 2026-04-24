@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>바이브 캘린더 Pro - 궁극의 최적화</title>
+    <title>바이브 캘린더 Pro - 렌더링 최적화</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -95,7 +95,6 @@
                 });
             }, [fbConfig]);
 
-            // 캐싱된 차시 맵
             const sessionMap = useMemo(() => {
                 const map = {};
                 const counts = {};
@@ -118,12 +117,13 @@
                 await setDoc(doc(getFirestore(), 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dateStr), data, { merge: true });
             };
 
-            // 낙관적 업데이트가 적용된 초고속 저장
             const handleSave = async () => {
                 if (!inputText || !user) return;
+                
                 const { getFirestore, doc, writeBatch } = window.FirebaseSDK;
                 const db = getFirestore();
                 const batch = writeBatch(db);
+
                 const optimisticEvents = { ...events };
 
                 if (isHolidayMode) {
@@ -141,9 +141,13 @@
 
                         if (!endDate || isEveryday || isMatchingDay) {
                             const newItem = { id: Date.now() + Math.random(), text: inputText, tag: selectedTag, completed: false };
-                            optimisticEvents[dStr] = [...(optimisticEvents[dStr] || []), newItem];
+                            const currentItems = optimisticEvents[dStr] || [];
+                            const newItems = [...currentItems, newItem];
+                            
+                            optimisticEvents[dStr] = newItems;
+                            
                             const ref = doc(db, 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dStr);
-                            batch.set(ref, { items: optimisticEvents[dStr] }, { merge: true });
+                            batch.set(ref, { items: newItems }, { merge: true });
                         }
                         curr.setDate(curr.getDate() + 1);
                     }
@@ -151,30 +155,30 @@
                 
                 setEvents(optimisticEvents); 
                 setAddingDate(null); setInputText(''); setEndDate(''); setRepeatDays([]); setIsHolidayMode(false);
-                try { await batch.commit(); } catch (e) { console.error(e); }
+
+                try { await batch.commit(); } catch (error) { console.error("저장 실패:", error); }
             };
 
-            // [핵심 변경] 낙관적 업데이트가 적용된 삭제 로직 (즉각 반응)
-            const handleDelete = async (dateStr, eventId) => {
-                // 1. 화면에서 먼저 지웁니다.
-                const updatedItems = events[dateStr].filter(i => i.id !== eventId);
+            // [수정 완료] 삭제 시 화면 즉시 반영 및 멈춤 해결
+            const handleDelete = (dateStr, eventId) => {
+                // 1. 화면에서 먼저 지웁니다 (0.01초 반응)
+                const updatedItems = (events[dateStr] || []).filter(i => i.id !== eventId);
                 setEvents(prev => ({ ...prev, [dateStr]: updatedItems }));
-
-                // 2. 뒤에서 조용히 DB와 동기화합니다.
-                await saveToDB(dateStr, { items: updatedItems });
+                
+                // 2. 서버에는 뒤에서 조용히 저장합니다 (기다리지 않음)
+                saveToDB(dateStr, { items: updatedItems }).catch(e => console.error("삭제 실패", e));
             };
 
-            // [핵심 변경] 낙관적 업데이트가 적용된 체크박스 완료 로직 (즉각 반응)
-            const toggleComplete = async (dateStr, eventId) => {
-                // 1. 화면에서 먼저 줄을 긋습니다.
-                const updatedItems = events[dateStr].map(item => item.id === eventId ? { ...item, completed: !item.completed } : item);
+            // [수정 완료] 체크 완료 시 화면 즉시 반영 및 멈춤 해결
+            const toggleComplete = (dateStr, eventId) => {
+                // 1. 화면에 먼저 줄을 긋습니다 (0.01초 반응)
+                const updatedItems = (events[dateStr] || []).map(item => item.id === eventId ? { ...item, completed: !item.completed } : item);
                 setEvents(prev => ({ ...prev, [dateStr]: updatedItems }));
-
-                // 2. 뒤에서 조용히 DB와 동기화합니다.
-                await saveToDB(dateStr, { items: updatedItems });
+                
+                // 2. 서버에는 뒤에서 조용히 저장합니다 (기다리지 않음)
+                saveToDB(dateStr, { items: updatedItems }).catch(e => console.error("토글 실패", e));
             };
 
-            // 낙관적 업데이트가 적용된 드래그 앤 드롭
             const handleDragStart = (e, dateStr, item) => {
                 e.dataTransfer.setData("item", JSON.stringify(item));
                 e.dataTransfer.setData("fromDate", dateStr);
@@ -191,14 +195,15 @@
                 const db = getFirestore();
                 const batch = writeBatch(db);
 
-                const fromItems = events[fromDateStr].filter(i => i.id !== item.id);
+                const fromItems = (events[fromDateStr] || []).filter(i => i.id !== item.id);
                 const toItems = [...(events[toDateStr] || []), item];
 
+                // 화면 즉시 반영
                 setEvents(prev => ({ ...prev, [fromDateStr]: fromItems, [toDateStr]: toItems }));
 
                 batch.set(doc(db, 'artifacts', fbConfig.appId, 'users', user.uid, 'days', fromDateStr), { items: fromItems }, { merge: true });
                 batch.set(doc(db, 'artifacts', fbConfig.appId, 'users', user.uid, 'days', toDateStr), { items: toItems }, { merge: true });
-                await batch.commit();
+                batch.commit().catch(e => console.error("이동 실패", e));
             };
 
             const renderDays = () => {
@@ -235,11 +240,12 @@
                             <div className="space-y-1 flex-1 overflow-y-auto no-scrollbar">
                                 {dayEvs.map(ev => (
                                     <div key={ev.id} draggable onDragStart={(e) => handleDragStart(e, dStr, ev)} className={`text-[8px] md:text-[9px] p-1 md:p-1.5 rounded border ${TAG_COLORS[ev.tag]} flex items-center gap-1 group/ev cursor-grab active:cursor-grabbing ${ev.completed ? 'opacity-40 grayscale' : ''}`}>
+                                        {/* 체크박스 즉시 반영 토글 적용 */}
                                         <input type="checkbox" checked={ev.completed} onChange={() => toggleComplete(dStr, ev.id)} className="w-2 h-2 md:w-3 md:h-3 no-drag"/>
                                         <span className={`truncate flex-1 ${ev.completed ? 'line-through' : ''}`}>
                                             {ev.text} {ev.tag === '수업' ? `(${sessionMap[ev.id] || ''}차시)` : ''}
                                         </span>
-                                        {/* [적용] X 버튼을 누르면 handleDelete가 실행됩니다. */}
+                                        {/* 삭제 버튼 즉시 반영 삭제 적용 */}
                                         <button onClick={() => handleDelete(dStr, ev.id)} className="ml-1 opacity-100 md:opacity-0 group-hover/ev:opacity-100 no-drag p-1">×</button>
                                     </div>
                                 ))}
