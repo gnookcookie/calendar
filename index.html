@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>바이브 캘린더 Pro - 선생님 전용</title>
+    <title>바이브 캘린더 Pro - 선생님 전용 최종</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -14,7 +14,7 @@
         .no-drag { -webkit-app-region: no-drag !important; }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
-        input[type="checkbox"] { accent-color: #3b82f6; width: 16px; height: 16px; }
+        input[type="checkbox"] { accent-color: #3b82f6; width: 18px; height: 18px; }
     </style>
 </head>
 <body>
@@ -22,9 +22,9 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-        window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, collection, doc, setDoc, onSnapshot };
+        window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut, getFirestore, collection, doc, setDoc, onSnapshot };
     </script>
 
     <script type="text/babel">
@@ -38,24 +38,26 @@
             const calendarRef = useRef(null);
             const today = new Date();
             const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
-            const [events, setEvents] = useState({}); // 일반 일정 { 'YYYY-MM-DD': [] }
-            const [customHolidays, setCustomHolidays] = useState({}); // 사용자 휴일 { 'YYYY-MM-DD': '명칭' }
+            const [events, setEvents] = useState({});
+            const [customHolidays, setCustomHolidays] = useState({});
             const [opacity, setOpacity] = useState(0.85);
             const [currentThemeIdx, setCurrentThemeIdx] = useState(0);
             const [addingDate, setAddingDate] = useState(null);
+            const [showSettings, setShowSettings] = useState(false);
             
-            // 입력 폼 상태
             const [inputText, setInputText] = useState('');
             const [selectedTag, setSelectedTag] = useState('수업');
-            const [endDate, setEndDate] = useState(''); // 반복 종료일
-            const [repeatDays, setRepeatDays] = useState([]); // [0,1,2,3,4,5,6]
-            const [isHolidayEntry, setIsHolidayEntry] = useState(false);
+            const [endDate, setEndDate] = useState('');
+            const [repeatDays, setRepeatDays] = useState([]);
+            const [isHolidayMode, setIsHolidayMode] = useState(false);
+            const [user, setUser] = useState(null);
 
-            const fbConfig = JSON.parse(localStorage.getItem('custom_firebase_config'));
             const isElectron = window.process && window.process.type === 'renderer';
+            const savedConfig = localStorage.getItem('custom_firebase_config');
+            const [fbConfig, setFbConfig] = useState(savedConfig ? JSON.parse(savedConfig) : null);
             const theme = THEMES[currentThemeIdx];
 
-            // --- [1. 마우스 통과 로직] ---
+            // [1] 마우스 상호작용
             useEffect(() => {
                 if (!isElectron) return;
                 const { ipcRenderer } = window.require('electron');
@@ -69,7 +71,7 @@
                 return () => window.removeEventListener('mousemove', handleMove);
             }, []);
 
-            // --- [2. Firebase 실시간 동기화] ---
+            // [2] Firebase & 로그인/아웃 로직
             useEffect(() => {
                 if (!fbConfig || !window.FirebaseSDK) return;
                 const { initializeApp, getAuth, onAuthStateChanged, signInAnonymously, getFirestore, collection, onSnapshot } = window.FirebaseSDK;
@@ -78,6 +80,7 @@
                 const db = getFirestore(app);
 
                 return onAuthStateChanged(auth, (u) => {
+                    setUser(u);
                     if (u) {
                         onSnapshot(collection(db, 'artifacts', fbConfig.appId, 'users', u.uid, 'days'), (snap) => {
                             const evs = {}; const hols = {};
@@ -90,18 +93,27 @@
                         });
                     } else { signInAnonymously(auth).catch(()=>{}); }
                 });
-            }, []);
+            }, [fbConfig]);
 
-            const saveToDB = async (dateStr, data) => {
-                const { getFirestore, doc, setDoc, getAuth } = window.FirebaseSDK;
-                const uid = getAuth().currentUser.uid;
-                await setDoc(doc(getFirestore(), 'artifacts', fbConfig.appId, 'users', uid, 'days', dateStr), data, { merge: true });
+            const handleLogin = async () => {
+                const { getAuth, signInWithPopup, GoogleAuthProvider } = window.FirebaseSDK;
+                try { await signInWithPopup(getAuth(), new GoogleAuthProvider()); } catch(e) { alert("로그인 실패: " + e.message); }
             };
 
-            // --- [3. 자동 차시 계산 로직] ---
+            const handleLogout = async () => {
+                const { getAuth, signOut } = window.FirebaseSDK;
+                try { await signOut(getAuth()); window.location.reload(); } catch(e) { alert(e.message); }
+            };
+
+            const saveToDB = async (dateStr, data) => {
+                if (!user) return;
+                const { getFirestore, doc, setDoc } = window.FirebaseSDK;
+                await setDoc(doc(getFirestore(), 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dateStr), data, { merge: true });
+            };
+
+            // [3] 자동 차시 계산
             const getSessionNum = (text, targetDate) => {
                 let count = 0;
-                // 모든 날짜를 정렬하여 순회하며 카운트
                 const sortedDates = Object.keys(events).sort();
                 for (const d of sortedDates) {
                     const matched = events[d].filter(e => e.text === text && e.tag === '수업');
@@ -111,35 +123,24 @@
                 return count;
             };
 
-            // --- [4. 반복 및 저장 로직] ---
             const handleSave = async () => {
                 if (!inputText) return;
-                
-                if (isHolidayEntry) {
-                    // 휴일로 저장
+                if (isHolidayMode) {
                     await saveToDB(addingDate, { holidayName: inputText });
                 } else {
-                    // 일반 또는 반복 일정 저장
                     const start = new Date(addingDate);
                     const end = endDate ? new Date(endDate) : start;
-                    
                     let curr = new Date(start);
                     while (curr <= end) {
                         const dStr = `${curr.getFullYear()}-${String(curr.getMonth()+1).padStart(2,'0')}-${String(curr.getDate()).padStart(2,'0')}`;
-                        // 단일 날짜거나, 사용자가 선택한 요일에 해당할 때만 저장
                         if (!endDate || repeatDays.includes(curr.getDay())) {
-                            const currentItems = events[dStr] || [];
-                            const newItems = [...currentItems, { id: Date.now() + Math.random(), text: inputText, tag: selectedTag }];
+                            const newItems = [...(events[dStr] || []), { id: Date.now() + Math.random(), text: inputText, tag: selectedTag }];
                             await saveToDB(dStr, { items: newItems });
                         }
                         curr.setDate(curr.getDate() + 1);
                     }
                 }
-                resetForm();
-            };
-
-            const resetForm = () => {
-                setAddingDate(null); setInputText(''); setEndDate(''); setRepeatDays([]); setIsHolidayEntry(false);
+                setAddingDate(null); setInputText(''); setEndDate(''); setRepeatDays([]); setIsHolidayMode(false);
             };
 
             const renderDays = () => {
@@ -151,19 +152,19 @@
                 for (let i = 0; i < firstDay; i++) days.push(<div key={`p-${i}`} className="opacity-5 bg-white/10 rounded-3xl"></div>);
                 for (let d = 1; d <= daysInMonth; d++) {
                     const dStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-                    const dayOfWeek = new Date(year, month, d).getDay();
+                    const dow = new Date(year, month, d).getDay();
                     const basicHol = BASIC_HOLIDAYS[`${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`];
                     const customHol = customHolidays[dStr];
-                    const isRed = dayOfWeek === 0 || basicHol || customHol;
-                    
+                    const isRed = dow === 0 || basicHol || customHol;
+
                     days.push(
-                        <div key={d} className="min-h-[115px] p-3 bg-white/5 border border-white/5 rounded-3xl relative group hover:bg-white/10 no-drag transition-all">
+                        <div key={d} className="min-h-[120px] p-3 bg-white/5 border border-white/5 rounded-3xl relative group hover:bg-white/10 no-drag">
                             <div className="flex justify-between items-start mb-1">
                                 <div className="flex flex-col">
-                                    <span className={`text-xs font-black ${isRed ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : 'text-white/40'}`}>{d}</span>
-                                    {(basicHol || customHol) && <span className="text-[9px] text-red-500 font-bold leading-tight mt-0.5">{basicHol || customHol}</span>}
+                                    <span className={`text-xs font-black ${isRed ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-white/40'}`}>{d}</span>
+                                    {(basicHol || customHol) && <span className="text-[9px] text-red-400 font-bold leading-tight mt-0.5">{basicHol || customHol}</span>}
                                 </div>
-                                <button onClick={() => setAddingDate(dStr)} className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white transition-all">+</button>
+                                <button onClick={() => setAddingDate(dStr)} className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white">+</button>
                             </div>
                             <div className="space-y-1 h-20 overflow-y-auto no-scrollbar">
                                 {(events[dStr] || []).map(ev => (
@@ -181,83 +182,114 @@
 
             return (
                 <div className="h-screen w-screen flex items-center justify-center bg-transparent">
-                    <div ref={calendarRef} style={{ backgroundColor: `${theme.bg}${opacity})` }} className="w-[98%] h-[98%] flex flex-col rounded-[3.5rem] shadow-2xl border border-white/10 backdrop-blur-xl relative">
-                        {/* 헤더 */}
-                        <div className="drag-area p-8 flex items-center justify-between bg-white/5 cursor-move">
-                            <div className="no-drag flex items-center gap-8 text-white">
+                    {/* [설정 버튼 강제 활성화] */}
+                    {!fbConfig && (
+                        <div className="fixed inset-0 z-[300] bg-slate-950 flex flex-col items-center justify-center p-10 text-center">
+                            <h2 className="text-3xl font-black text-white mb-8">데스크 캘린더 설정이 필요합니다</h2>
+                            <button onClick={()=>setShowSettings(true)} className="px-12 py-6 bg-blue-600 rounded-3xl font-black text-xl text-white shadow-2xl hover:scale-105 transition-all">설정 시작하기</button>
+                        </div>
+                    )}
+
+                    {showSettings && (
+                        <div className="fixed inset-0 z-[310] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-4">
+                            <form onSubmit={(e)=>{
+                                e.preventDefault();
+                                const fd = new FormData(e.target);
+                                localStorage.setItem('custom_firebase_config', JSON.stringify(Object.fromEntries(fd.entries())));
+                                window.location.reload();
+                            }} className="bg-slate-900 p-12 rounded-[4rem] border border-white/10 w-[550px] shadow-2xl no-drag">
+                                <h2 className="text-2xl font-black text-white mb-8 flex justify-between">Firebase 설정 <button type="button" onClick={()=>setShowSettings(false)} className="text-sm opacity-30">취소</button></h2>
+                                {['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'].map(k => (
+                                    <input key={k} name={k} placeholder={k} defaultValue={fbConfig?.[k] || ''} className="w-full bg-black/40 border border-white/10 p-4 rounded-2xl mb-2 text-sm text-white outline-none"/>
+                                ))}
+                                <button type="submit" className="w-full py-5 bg-blue-600 rounded-2xl font-black text-white mt-6">저장 후 동기화 시작</button>
+                            </form>
+                        </div>
+                    )}
+
+                    <div ref={calendarRef} style={{ backgroundColor: `${theme.bg}${opacity})` }} className="w-[98%] h-[98%] flex flex-col rounded-[4rem] shadow-2xl border border-white/10 backdrop-blur-3xl relative overflow-hidden transition-all duration-700">
+                        {/* 헤더: 로그인/아웃/설정 모두 배치 */}
+                        <div className="drag-area p-10 flex items-center justify-between bg-white/5 cursor-move">
+                            <div className="no-drag flex items-center gap-10 text-white">
                                 <h1 className="text-4xl font-black tracking-tighter">{currentDate.getFullYear()}년 {currentDate.getMonth()+1}월</h1>
-                                <div className="flex items-center gap-4 bg-black/20 px-5 py-2 rounded-2xl border border-white/5">
-                                    <button onClick={() => setCurrentThemeIdx(p => (p+1)%THEMES.length)} className="text-xs font-bold opacity-50 hover:opacity-100">🎨 THEME</button>
-                                    <div className="w-[1px] h-3 bg-white/10"></div>
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-[10px] opacity-30">OPACITY</span>
-                                        <input type="range" min="0.1" max="1" step="0.05" value={opacity} onChange={e => setOpacity(e.target.value)} className="w-24 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-blue-600"/>
-                                    </div>
+                                <div className="flex items-center gap-5 bg-black/40 px-6 py-2.5 rounded-2xl border border-white/5">
+                                    <button onClick={() => setCurrentThemeIdx(p => (p+1)%THEMES.length)} className="text-[10px] font-black opacity-40 hover:opacity-100 uppercase">🎨 {theme.id}</button>
+                                    <div className="w-[1px] h-4 bg-white/10"></div>
+                                    <input type="range" min="0.1" max="1" step="0.05" value={opacity} onChange={e => setOpacity(e.target.value)} className="w-24 accent-blue-600"/>
+                                    <button onClick={() => setShowSettings(true)} className="text-[10px] font-black opacity-40 hover:opacity-100 ml-2">⚙️ CONFIG</button>
                                 </div>
                             </div>
-                            <div className="no-drag flex bg-black/40 rounded-3xl p-1.5 shadow-2xl border border-white/5">
-                                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1))} className="p-4 text-white/30 hover:text-white transition-all">◀</button>
-                                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1))} className="p-4 text-white/30 hover:text-white transition-all">▶</button>
+                            
+                            <div className="no-drag flex items-center gap-5">
+                                {user && !user.isAnonymous ? (
+                                    <div className="flex items-center gap-4 bg-white/5 p-2 pr-6 rounded-full border border-white/10">
+                                        <img src={user.photoURL} className="w-10 h-10 rounded-full border border-white/20"/>
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] font-black text-white/60">{user.displayName}</span>
+                                            <button onClick={handleLogout} className="text-[9px] font-black text-red-400 hover:text-red-300 text-left">LOGOUT</button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <button onClick={handleLogin} className="px-8 py-3 bg-blue-600 rounded-2xl font-black text-sm text-white hover:bg-blue-500 shadow-xl transition-all">Google Login</button>
+                                )}
+                                <div className="flex bg-black/50 rounded-3xl p-1 shadow-2xl border border-white/5">
+                                    <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1))} className="p-4 text-white/20 hover:text-white">◀</button>
+                                    <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1))} className="p-4 text-white/20 hover:text-white">▶</button>
+                                </div>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-7 gap-3 px-12 py-5 text-center text-[10px] font-black uppercase tracking-[0.3em] text-white/10">
+                        <div className="grid grid-cols-7 gap-3 px-12 py-6 text-center text-[10px] font-black uppercase tracking-[0.4em] text-white/10">
                             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => <div key={d}>{d}</div>)}
                         </div>
 
                         <div className="flex-1 p-12 pt-0 overflow-y-auto custom-scrollbar no-drag">
-                            <div className="grid grid-cols-7 gap-4">{renderDays()}</div>
+                            <div className="grid grid-cols-7 gap-5">{renderDays()}</div>
                         </div>
 
-                        {/* [5. 창 크기 조절 손잡이] */}
+                        {/* 창 조절 ◢ */}
                         <div onMouseDown={(e) => {
                             const sX = e.clientX; const sY = e.clientY; const sW = window.innerWidth; const sH = window.innerHeight;
                             const onM = (m) => window.require('electron').ipcRenderer.send('resize-window', { width: sW+(m.clientX-sX), height: sH+(m.clientY-sY) });
                             const onU = () => { window.removeEventListener('mousemove', onM); window.removeEventListener('mouseup', onU); };
                             window.addEventListener('mousemove', onM); window.addEventListener('mouseup', onU);
-                        }} className="absolute bottom-8 right-8 w-10 h-10 cursor-nwse-resize text-white/10 hover:text-blue-500 no-drag flex items-end justify-end p-1 transition-colors">◢</div>
+                        }} className="absolute bottom-10 right-10 w-12 h-12 cursor-nwse-resize text-white/5 hover:text-blue-500 flex items-end justify-end p-2 transition-all">◢</div>
 
-                        {/* [6. 입력 팝업] */}
+                        {/* 입력 팝업 */}
                         {addingDate && (
-                            <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-50 no-drag backdrop-blur-md">
-                                <div className="bg-slate-900 p-10 rounded-[3.5rem] border border-white/10 w-[500px] shadow-2xl text-white">
+                            <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 no-drag backdrop-blur-xl">
+                                <div className="bg-slate-900 p-12 rounded-[4rem] border border-white/10 w-[550px] shadow-2xl text-white">
                                     <div className="flex justify-between items-center mb-8">
-                                        <h3 className="text-2xl font-black tracking-tight">{addingDate}</h3>
-                                        <button onClick={() => setIsHolidayEntry(!isHolidayEntry)} className={`px-4 py-1.5 rounded-full text-[10px] font-black border transition-all ${isHolidayEntry ? 'bg-red-600 border-red-600 text-white' : 'border-white/10 text-white/20'}`}>
-                                            {isHolidayEntry ? '휴일 모드 ON' : '휴일 등록'}
+                                        <h3 className="text-3xl font-black tracking-tighter">{addingDate}</h3>
+                                        <button onClick={() => setIsHolidayMode(!isHolidayMode)} className={`px-5 py-2 rounded-full text-[10px] font-black border transition-all ${isHolidayMode ? 'bg-red-600 border-red-600' : 'border-white/10 text-white/20'}`}>
+                                            {isHolidayMode ? '휴일 모드 ON' : '휴일 등록'}
                                         </button>
                                     </div>
-                                    
-                                    <input autoFocus value={inputText} onChange={e => setInputText(e.target.value)} className="w-full bg-black/40 border border-white/10 p-5 rounded-[1.5rem] mb-6 outline-none focus:border-blue-500 text-lg" placeholder={isHolidayEntry ? "휴일 명칭 입력" : "수업 또는 업무 내용 입력"}/>
-                                    
-                                    {!isHolidayEntry && (
-                                        <div className="space-y-6">
+                                    <input autoFocus value={inputText} onChange={e => setInputText(e.target.value)} className="w-full bg-black/50 border border-white/10 p-6 rounded-3xl mb-8 outline-none focus:border-blue-500 text-xl font-bold" placeholder={isHolidayMode ? "휴일 명칭" : "수업/업무 내용"}/>
+                                    {!isHolidayMode && (
+                                        <div className="space-y-8">
                                             <div className="flex gap-2">
-                                                {Object.keys(TAG_COLORS).map(t => (
-                                                    <button key={t} onClick={() => setSelectedTag(t)} className={`flex-1 py-3 rounded-2xl text-xs font-black transition-all ${selectedTag === t ? TAG_COLORS[t] : 'bg-white/5 text-white/20 hover:bg-white/10'}`}>{t}</button>
+                                                {['수업','업무','개인','기타'].map(t => (
+                                                    <button key={t} onClick={() => setSelectedTag(t)} className={`flex-1 py-4 rounded-2xl text-[11px] font-black transition-all ${selectedTag === t ? TAG_COLORS[t] : 'bg-white/5 text-white/20 hover:bg-white/10'}`}>{t}</button>
                                                 ))}
                                             </div>
-                                            <div className="bg-black/30 p-6 rounded-[2rem] border border-white/5">
-                                                <label className="text-[11px] font-black text-white/20 block mb-4 uppercase tracking-widest">반복 설정</label>
-                                                <div className="mb-6">
-                                                    <span className="text-[10px] text-white/40 block mb-2 ml-1">언제까지 반복할까요?</span>
-                                                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent border-b border-white/10 w-full outline-none text-sm py-2 px-1 focus:border-blue-500 transition-all"/>
-                                                </div>
-                                                <div className="flex justify-between px-2">
+                                            <div className="bg-black/30 p-8 rounded-[2.5rem] border border-white/5">
+                                                <span className="text-[11px] font-black text-white/20 block mb-6 uppercase tracking-widest">반복 기간 지정</span>
+                                                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent border-b border-white/10 w-full outline-none text-sm py-2 mb-8 focus:border-blue-500 transition-all"/>
+                                                <div className="flex justify-between">
                                                     {['일','월','화','수','목','금','토'].map((d, i) => (
-                                                        <label key={i} className="flex flex-col items-center gap-2 cursor-pointer group">
-                                                            <span className={`text-[10px] font-bold ${repeatDays.includes(i) ? 'text-blue-400' : 'text-white/20 group-hover:text-white/40'}`}>{d}</span>
-                                                            <input type="checkbox" checked={repeatDays.includes(i)} onChange={(e) => e.target.checked ? setRepeatDays([...repeatDays, i]) : setRepeatDays(repeatDays.filter(day => day !== i))} className="rounded-full border-none"/>
+                                                        <label key={i} className="flex flex-col items-center gap-3 cursor-pointer group">
+                                                            <span className={`text-[11px] font-black ${repeatDays.includes(i) ? 'text-blue-400' : 'text-white/20'}`}>{d}</span>
+                                                            <input type="checkbox" checked={repeatDays.includes(i)} onChange={(e) => e.target.checked ? setRepeatDays([...repeatDays, i]) : setRepeatDays(repeatDays.filter(day => day !== i))} className="w-5 h-5"/>
                                                         </label>
                                                     ))}
                                                 </div>
                                             </div>
                                         </div>
                                     )}
-
-                                    <div className="flex gap-4 mt-8">
-                                        <button onClick={handleSave} className="flex-[2] py-5 bg-blue-600 rounded-[1.5rem] font-black shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all">저장하기</button>
-                                        <button onClick={resetForm} className="flex-1 py-5 bg-white/5 rounded-[1.5rem] text-white/40 font-black hover:bg-white/10 transition-all">취소</button>
+                                    <div className="flex gap-4 mt-10">
+                                        <button onClick={handleSave} className="flex-[2] py-6 bg-blue-600 rounded-[2.5rem] font-black text-lg shadow-2xl hover:scale-105 transition-all">저장하기</button>
+                                        <button onClick={() => setAddingDate(null)} className="flex-1 py-6 bg-white/5 rounded-[2.5rem] text-white/20 font-black">취소</button>
                                     </div>
                                 </div>
                             </div>
