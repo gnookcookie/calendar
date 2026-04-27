@@ -79,7 +79,6 @@
             const fbConfig = JSON.parse(localStorage.getItem('custom_firebase_config'));
             const theme = THEMES[currentThemeIdx];
 
-            // 마우스 관통 제어 로직
             useEffect(() => {
                 if (!isElectron) return;
                 const { ipcRenderer } = window.require('electron');
@@ -95,7 +94,6 @@
                 return () => window.removeEventListener('mousemove', handleMove);
             }, [isElectron]);
 
-            // Firebase 실시간 동기화
             useEffect(() => {
                 if (!fbConfig || !window.FirebaseSDK) return;
                 const { initializeApp, getAuth, onAuthStateChanged, signInAnonymously, getFirestore, collection, onSnapshot } = window.FirebaseSDK;
@@ -125,7 +123,6 @@
                 });
             }, [fbConfig]);
 
-            // 수업 차시 자동 계산 엔진
             const sessionMap = useMemo(() => {
                 const map = {}; const counts = {};
                 const sortedDates = Object.keys(events).sort();
@@ -285,13 +282,16 @@
                             onClick={() => window.innerWidth < 768 && setSelectedMobileDate(dStr)} 
                             className={`min-h-[100px] border-r border-b border-white/10 relative group hover:bg-white/10 transition-colors flex flex-col no-drag overflow-hidden cursor-pointer md:cursor-default
                             ${dow === 0 ? 'bg-red-950/20' : dow === 6 ? 'bg-blue-950/20' : 'bg-slate-900/40'}`}>
-                            <div className="flex justify-between items-start px-1.5 py-1 w-full">
-                                <div className="flex flex-col">
-                                    <span className={`text-[11px] font-bold ${isToday ? 'bg-blue-600 text-white px-1 shadow' : isRed ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-white/80'}`}>{d}</span>
-                                    {(basicHol || customHol) && <span className="text-[9px] text-red-500 font-bold truncate leading-none mt-0.5">{basicHol || customHol}</span>}
+                            
+                            {/* [핵심 수정] 위아래로 쌓이던 구조를 '가로 배치(flex-row, items-center)'로 변경하여 세로 줄밀림 원천 차단 */}
+                            <div className="flex justify-between items-start px-1.5 py-1 w-full min-w-0">
+                                <div className="flex items-center gap-1 min-w-0 flex-1">
+                                    <span className={`text-[11px] font-bold shrink-0 ${isToday ? 'bg-blue-600 text-white px-1 shadow' : isRed ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-white/80'}`}>{d}</span>
+                                    {(basicHol || customHol) && <span className="text-[9px] text-red-500 font-bold truncate leading-none pt-[1px]">{basicHol || customHol}</span>}
                                 </div>
-                                <button onClick={(e) => { e.stopPropagation(); setAddingDate(dStr); }} className="hidden md:block opacity-0 group-hover:opacity-100 text-white/40 hover:text-white shrink-0 text-sm leading-none">+</button>
+                                <button onClick={(e) => { e.stopPropagation(); setAddingDate(dStr); }} className="hidden md:block opacity-0 group-hover:opacity-100 text-white/40 hover:text-white shrink-0 text-sm leading-none ml-1">+</button>
                             </div>
+
                             <div className="space-y-[2px] flex-1 overflow-y-auto custom-scrollbar pointer-events-none md:pointer-events-auto px-1 pb-1">
                                 {dayEvs.map(ev => (
                                     <div key={ev.id} draggable onDragStart={(e) => handleDragStart(e, dStr, ev)} 
@@ -320,7 +320,6 @@
                         </div>
                     )}
 
-                    {/* 상단 1줄 슬림 헤더 */}
                     <div className="drag-area h-10 bg-black/60 border-b border-white/20 flex justify-between items-center px-4 shrink-0">
                         <div className="flex items-center gap-3 no-drag">
                             <span className="text-sm font-bold text-white">{currentDate.getFullYear()}년 {currentDate.getMonth()+1}월</span>
@@ -413,12 +412,10 @@
                         </div>
                     )}
 
-                    {/* [버튼 복구 완료] 일정 추가 모달 */}
                     {addingDate && (
                         <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 no-drag p-4 backdrop-blur-md">
                             <div className="bg-slate-900 p-8 border border-white/20 w-full max-w-md shadow-2xl text-white">
                                 
-                                {/* 휴일 지정 버튼 위치 정상화 */}
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="text-xl font-bold text-blue-400">{addingDate}</h3>
                                     <button onClick={() => setIsHolidayMode(!isHolidayMode)} className={`px-3 py-1.5 text-[11px] font-bold border ${isHolidayMode ? 'bg-red-900/50 border-red-500/50 text-red-200' : 'border-white/20 text-white/50 hover:text-white'}`}>
