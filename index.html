@@ -52,7 +52,12 @@
             const [dragOffset, setDragOffset] = useState(0);
             const [isDragging, setIsDragging] = useState(false);
 
-            const fbConfig = JSON.parse(localStorage.getItem('custom_firebase_config'));
+            let fbConfig = null;
+            try {
+                fbConfig = JSON.parse(localStorage.getItem('custom_firebase_config'));
+            } catch(e) {
+                localStorage.removeItem('custom_firebase_config'); // 에러 난 찌꺼기 즉시 삭제
+            }
             const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
 
             // 파이어베이스 초기화 및 데이터 동기화
