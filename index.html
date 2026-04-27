@@ -52,8 +52,17 @@
             const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
             const [events, setEvents] = useState({});
             const [customHolidays, setCustomHolidays] = useState({});
-            const [opacity, setOpacity] = useState(0.85);
-            const [currentThemeIdx, setCurrentThemeIdx] = useState(0);
+            
+            // [개선] 투명도와 테마를 로컬 스토리지에서 불러오기 (없으면 기본값)
+            const [opacity, setOpacity] = useState(() => {
+                const saved = localStorage.getItem('vibe_opacity');
+                return saved !== null ? parseFloat(saved) : 0.85;
+            });
+            const [currentThemeIdx, setCurrentThemeIdx] = useState(() => {
+                const saved = localStorage.getItem('vibe_theme_idx');
+                return saved !== null ? parseInt(saved, 10) : 0;
+            });
+
             const [addingDate, setAddingDate] = useState(null);
             const [showSettings, setShowSettings] = useState(false);
             const [showTodayPopup, setShowTodayPopup] = useState(false);
@@ -79,6 +88,10 @@
             const isElectron = window.process && window.process.type === 'renderer';
             const fbConfig = JSON.parse(localStorage.getItem('custom_firebase_config'));
             const theme = THEMES[currentThemeIdx];
+
+            // [개선] 투명도나 테마가 변경될 때마다 로컬 스토리지에 저장
+            useEffect(() => { localStorage.setItem('vibe_opacity', opacity); }, [opacity]);
+            useEffect(() => { localStorage.setItem('vibe_theme_idx', currentThemeIdx); }, [currentThemeIdx]);
 
             useEffect(() => {
                 if (!isElectron) return;
@@ -290,7 +303,6 @@
                 const prevMonthLastDate = new Date(year, month, 0).getDate();
                 const totalSlots = Math.ceil((firstDay + daysInMonth) / 7) * 7;
 
-                // [버그 수정] 고유한 Key 부여로 번쩍임 완벽 제거
                 for (let i = 0; i < firstDay; i++) {
                     const prevD = prevMonthLastDate - firstDay + i + 1;
                     days.push(<div key={`p-${year}-${month}-${i}`} className="min-h-[100px] border-r border-b border-white/10 bg-white/5 opacity-40 flex flex-col px-1.5 py-1"><span className="text-[11px] font-bold text-white/30">{prevD}</span></div>);
@@ -308,7 +320,6 @@
                         .filter(e => filterTag === '전체' || e.tag === filterTag)
                         .sort((a, b) => a.completed - b.completed);
 
-                    // [버그 수정] d 가 아닌 dStr을 Key로 사용하여 재활용 방지
                     days.push(
                         <div key={dStr} onDragOver={e => e.preventDefault()} onDrop={e => handleDrop(e, dStr)}
                             onClick={() => window.innerWidth < 768 && setSelectedMobileDate(dStr)} 
