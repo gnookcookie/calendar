@@ -71,23 +71,6 @@
             const theme = THEMES[currentThemeIdx];
             const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
 
-            // 마우스 관통 제어 로직 (가장자리 테두리 15px 추가)
-            useEffect(() => {
-                if (!isElectron) return;
-                const { ipcRenderer } = window.require('electron');
-                const handleMove = (e) => {
-                    const edge = 15;
-                    const isNearEdge = 
-                        e.clientX < edge || e.clientX > window.innerWidth - edge || 
-                        e.clientY < edge || e.clientY > window.innerHeight - edge;
-
-                    const isInteractive = e.target.closest('.no-drag') || e.target.closest('.resize-handle') || e.target.closest('.custom-scrollbar') || isNearEdge;
-                    ipcRenderer.send('set-ignore-mouse', !isInteractive);
-                };
-                window.addEventListener('mousemove', handleMove);
-                return () => window.removeEventListener('mousemove', handleMove);
-            }, [isElectron]);
-
             // Firebase 데이터 실시간 동기화
             useEffect(() => {
                 if (!fbConfig || !window.FirebaseSDK) return;
