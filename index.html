@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>바이브 캘린더 Pro - 실무 최적화</title>
+    <title>바이브 캘린더 Pro - 실무 최종판</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -16,7 +16,6 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 0px; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         input[type="checkbox"] { accent-color: #3b82f6; cursor: pointer; }
-        /* 우측 하단 리사이즈 삼각형 */
         .resize-handle { position: absolute; bottom: 0; right: 0; width: 20px; height: 20px; background: linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.4) 50%); cursor: nwse-resize; z-index: 100; }
     </style>
 </head>
@@ -35,12 +34,22 @@
 
         const BASIC_HOLIDAYS = { '01-01': '신정', '03-01': '삼일절', '05-05': '어린이날', '06-06': '현충일', '08-15': '광복절', '10-03': '개천절', '10-09': '한글날', '12-25': '성탄절' };
         const TAGS = ['수업', '업무', '개인', '기타'];
-        // [UI 변경] 배경 박스 대신 깔끔한 텍스트 포인트 색상으로 변경
         const TAG_COLORS = { '수업': 'text-blue-300', '업무': 'text-red-300', '개인': 'text-emerald-300', '기타': 'text-slate-300' };
-        const THEMES = [{ id: '다크', bg: 'rgba(15, 23, 42, ' }, { id: '미드나잇', bg: 'rgba(9, 9, 11, ' }, { id: '오션', bg: 'rgba(23, 37, 84, ' }];
+        
+        // [업데이트] 더 다양해진 컬러 테마
+        const THEMES = [
+            { id: '다크', bg: 'rgba(15, 23, 42, ' },
+            { id: '미드나잇', bg: 'rgba(9, 9, 11, ' },
+            { id: '오션', bg: 'rgba(23, 37, 84, ' },
+            { id: '포레스트', bg: 'rgba(20, 83, 45, ' },
+            { id: '로즈', bg: 'rgba(131, 24, 67, ' },
+            { id: '선셋', bg: 'rgba(124, 45, 18, ' }
+        ];
 
         function App() {
             const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+            
             const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
             const [events, setEvents] = useState({});
             const [customHolidays, setCustomHolidays] = useState({});
@@ -48,6 +57,8 @@
             const [currentThemeIdx, setCurrentThemeIdx] = useState(0);
             const [addingDate, setAddingDate] = useState(null);
             const [showSettings, setShowSettings] = useState(false);
+            const [showTodayPopup, setShowTodayPopup] = useState(false);
+            const [filterTag, setFilterTag] = useState('전체');
             
             const [inputText, setInputText] = useState('');
             const [selectedTag, setSelectedTag] = useState('수업');
@@ -55,31 +66,16 @@
             const [repeatDays, setRepeatDays] = useState([]);
             const [isHolidayMode, setIsHolidayMode] = useState(false);
             const [user, setUser] = useState(null);
-            const [rawConfig, setRawConfig] = useState('');
+
+            // [업데이트] 설정창 열 때 기존 코드가 보이도록 localStorage에서 직접 로드
+            const [rawConfig, setRawConfig] = useState(() => localStorage.getItem('custom_firebase_config_raw') || '');
 
             const isUpdatingRef = useRef(false);
             const isElectron = window.process && window.process.type === 'renderer';
             const fbConfig = JSON.parse(localStorage.getItem('custom_firebase_config'));
             const theme = THEMES[currentThemeIdx];
-            const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
 
-            // 마우스 관통 제어 로직 (로직 유지)
-            useEffect(() => {
-                if (!isElectron) return;
-                const { ipcRenderer } = window.require('electron');
-                const handleMove = (e) => {
-                    const edge = 15;
-                    const isNearEdge = 
-                        e.clientX < edge || e.clientX > window.innerWidth - edge || 
-                        e.clientY < edge || e.clientY > window.innerHeight - edge;
-                    const isInteractive = e.target.closest('.no-drag') || e.target.closest('.resize-handle') || e.target.closest('.custom-scrollbar') || isNearEdge;
-                    ipcRenderer.send('set-ignore-mouse', !isInteractive);
-                };
-                window.addEventListener('mousemove', handleMove);
-                return () => window.removeEventListener('mousemove', handleMove);
-            }, [isElectron]);
-
-            // Firebase 실시간 동기화 (로직 유지)
+            // Firebase 실시간 동기화
             useEffect(() => {
                 if (!fbConfig || !window.FirebaseSDK) return;
                 const { initializeApp, getAuth, onAuthStateChanged, signInAnonymously, getFirestore, collection, onSnapshot } = window.FirebaseSDK;
@@ -98,13 +94,19 @@
                                 evs[doc.id] = data.items || [];
                                 if (data.holidayName) hols[doc.id] = data.holidayName;
                             });
-                            setEvents(evs); setCustomHolidays(hols);
+                            setEvents(evs);
+                            setCustomHolidays(hols);
+
+                            // [업데이트] 앱 로딩 시 오늘 일정이 있으면 팝업 표시 (한 번만)
+                            if (evs[todayStr] && evs[todayStr].length > 0 && !showTodayPopup) {
+                                setShowTodayPopup(true);
+                            }
                         });
                     } else { signInAnonymously(auth).catch(()=>{}); }
                 });
             }, [fbConfig]);
 
-            // 차시 계산 엔진 (로직 유지)
+            // 수업 차시 자동 계산 엔진
             const sessionMap = useMemo(() => {
                 const map = {}; const counts = {};
                 const sortedDates = Object.keys(events).sort();
@@ -125,11 +127,9 @@
                 setTimeout(() => { isUpdatingRef.current = false; }, 2000); 
             };
 
-            // 반복 및 차시 배정 저장 (로직 유지)
             const handleSave = async () => {
                 if (!inputText || !user) return;
                 triggerUpdatingShield(); 
-                
                 const { getFirestore, doc, writeBatch } = window.FirebaseSDK;
                 const db = getFirestore();
                 const batch = writeBatch(db);
@@ -142,17 +142,12 @@
                     const start = new Date(addingDate);
                     const end = endDate ? new Date(endDate) : start;
                     let curr = new Date(start);
-                    
                     while (curr <= end) {
                         const dStr = `${curr.getFullYear()}-${String(curr.getMonth()+1).padStart(2,'0')}-${String(curr.getDate()).padStart(2,'0')}`;
-                        const isEveryday = repeatDays.length === 0;
-                        const isMatchingDay = repeatDays.includes(curr.getDay());
-
-                        if (!endDate || isEveryday || isMatchingDay) {
+                        if (!endDate || repeatDays.length === 0 || repeatDays.includes(curr.getDay())) {
                             const newItem = { id: Date.now() + Math.random(), text: inputText, tag: selectedTag, completed: false };
                             optimisticEvents[dStr] = [...(optimisticEvents[dStr] || []), newItem];
-                            const ref = doc(db, 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dStr);
-                            batch.set(ref, { items: optimisticEvents[dStr] }, { merge: true });
+                            batch.set(doc(db, 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dStr), { items: optimisticEvents[dStr] }, { merge: true });
                         }
                         curr.setDate(curr.getDate() + 1);
                     }
@@ -170,37 +165,12 @@
                 await setDoc(doc(getFirestore(), 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dateStr), { items: updatedItems }, { merge: true });
             };
 
-            const toggleComplete = async (dateStr, eventId) => {
+            const toggleComplete = async (dateStr, id) => {
                 triggerUpdatingShield();
-                const updatedItems = (events[dateStr] || []).map(item => item.id === eventId ? { ...item, completed: !item.completed } : item);
-                setEvents(prev => ({ ...prev, [dateStr]: updatedItems }));
+                const updated = events[dateStr].map(ev => ev.id === id ? { ...ev, completed: !ev.completed } : ev);
+                setEvents(prev => ({ ...prev, [dateStr]: updated }));
                 const { getFirestore, doc, setDoc } = window.FirebaseSDK;
-                await setDoc(doc(getFirestore(), 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dateStr), { items: updatedItems }, { merge: true });
-            };
-
-            const handleDragStart = (e, dateStr, item) => {
-                e.dataTransfer.setData("item", JSON.stringify(item));
-                e.dataTransfer.setData("fromDate", dateStr);
-            };
-
-            const handleDrop = async (e, toDateStr) => {
-                const itemStr = e.dataTransfer.getData("item");
-                if (!itemStr) return;
-                const item = JSON.parse(itemStr);
-                const fromDateStr = e.dataTransfer.getData("fromDate");
-                if (fromDateStr === toDateStr) return;
-
-                triggerUpdatingShield();
-                const { getFirestore, doc, writeBatch } = window.FirebaseSDK;
-                const db = getFirestore();
-                const batch = writeBatch(db);
-                const fromItems = (events[fromDateStr] || []).filter(i => i.id !== item.id);
-                const toItems = [...(events[toDateStr] || []), item];
-
-                setEvents(prev => ({ ...prev, [fromDateStr]: fromItems, [toDateStr]: toItems }));
-                batch.set(doc(db, 'artifacts', fbConfig.appId, 'users', user.uid, 'days', fromDateStr), { items: fromItems }, { merge: true });
-                batch.set(doc(db, 'artifacts', fbConfig.appId, 'users', user.uid, 'days', toDateStr), { items: toItems }, { merge: true });
-                batch.commit().catch(e => console.error(e));
+                await setDoc(doc(getFirestore(), 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dateStr), { items: updated }, { merge: true });
             };
 
             const handleSmartConfigSave = () => {
@@ -214,30 +184,25 @@
                     });
                     if (Object.keys(configObj).length < 6) { alert("코드 누락"); return; }
                     localStorage.setItem('custom_firebase_config', JSON.stringify(configObj));
+                    localStorage.setItem('custom_firebase_config_raw', rawConfig); // [업데이트] 생 코드도 저장
                     window.location.reload();
                 } catch (e) { alert("파싱 오류"); }
             };
 
             const handleResize = (e) => {
                 if (!isElectron) return;
-                e.preventDefault();
-                e.target.setPointerCapture(e.pointerId);
+                e.preventDefault(); e.target.setPointerCapture(e.pointerId);
                 const { ipcRenderer } = window.require('electron');
                 const startX = e.screenX; const startY = e.screenY;
-                const startWidth = window.innerWidth; const startHeight = window.innerHeight;
-
-                const onMove = (moveEvent) => {
-                    const w = Math.max(600, startWidth + (moveEvent.screenX - startX));
-                    const h = Math.max(500, startHeight + (moveEvent.screenY - startY));
-                    ipcRenderer.send('window-resize', w, h);
+                const startW = window.innerWidth; const startH = window.innerHeight;
+                const onMove = (m) => {
+                    ipcRenderer.send('window-resize', Math.max(600, startW + (m.screenX - startX)), Math.max(500, startH + (m.screenY - startY)));
                 };
-                const onUp = (upEvent) => {
-                    upEvent.target.releasePointerCapture(upEvent.pointerId);
-                    window.removeEventListener('pointermove', onMove);
-                    window.removeEventListener('pointerup', onUp);
+                const onUp = (u) => {
+                    u.target.releasePointerCapture(u.pointerId);
+                    window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp);
                 };
-                window.addEventListener('pointermove', onMove);
-                window.addEventListener('pointerup', onUp);
+                window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp);
             };
 
             const renderDays = () => {
@@ -252,38 +217,33 @@
                     const dow = new Date(year, month, d).getDay();
                     const basicHol = BASIC_HOLIDAYS[`${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`];
                     const customHol = customHolidays[dStr];
-                    
                     const isToday = dStr === todayStr;
                     const isRed = dow === 0 || basicHol || customHol;
 
-                    const dayEvs = (events[dStr] || []).sort((a, b) => a.completed - b.completed);
+                    // [업데이트] 필터 로직 적용
+                    const dayEvs = (events[dStr] || [])
+                        .filter(e => filterTag === '전체' || e.tag === filterTag)
+                        .sort((a, b) => a.completed - b.completed);
 
                     days.push(
-                        <div key={d} 
-                            onDragOver={e => e.preventDefault()} 
-                            onDrop={e => handleDrop(e, dStr)} 
+                        <div key={d} onDragOver={e => e.preventDefault()} 
                             className={`min-h-[100px] border-r border-b border-white/10 relative group hover:bg-white/10 transition-colors flex flex-col no-drag overflow-hidden
                             ${dow === 0 ? 'bg-red-950/20' : dow === 6 ? 'bg-blue-950/20' : 'bg-slate-900/40'}`}>
-                            
                             <div className="flex justify-between items-start px-1.5 py-1 w-full">
                                 <div className="flex flex-col">
-                                    <span className={`text-[11px] font-bold ${isToday ? 'bg-blue-600 text-white px-1 rounded shadow' : isRed ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-white/80'}`}>
-                                        {d}
-                                    </span>
+                                    <span className={`text-[11px] font-bold ${isToday ? 'bg-blue-600 text-white px-1 rounded shadow' : isRed ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-white/80'}`}>{d}</span>
                                     {(basicHol || customHol) && <span className="text-[9px] text-red-500 font-bold truncate leading-none mt-0.5">{basicHol || customHol}</span>}
                                 </div>
-                                <button onClick={(e) => { e.stopPropagation(); setAddingDate(dStr); }} className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white shrink-0 text-sm leading-none">+</button>
+                                <button onClick={() => setAddingDate(dStr)} className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white shrink-0 text-sm leading-none">+</button>
                             </div>
-
                             <div className="space-y-[2px] flex-1 overflow-y-auto custom-scrollbar pointer-events-auto px-1 pb-1">
                                 {dayEvs.map(ev => (
-                                    <div key={ev.id} draggable onDragStart={(e) => handleDragStart(e, dStr, ev)} 
-                                        className={`text-[11px] leading-tight flex items-start gap-1 cursor-grab group/ev hover:bg-white/10 rounded-sm px-0.5 py-0.5 ${ev.completed ? 'opacity-40 line-through text-white/50' : 'text-white/90'}`}>
+                                    <div key={ev.id} className={`text-[11px] leading-tight flex items-start gap-1 group/ev hover:bg-white/10 rounded-sm px-0.5 py-0.5 ${ev.completed ? 'opacity-40 line-through text-white/50' : 'text-white/90'}`}>
                                         <span className={`shrink-0 font-black ${TAG_COLORS[ev.tag]}`}>•</span>
-                                        <span className="truncate flex-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); toggleComplete(dStr, ev.id); }}>
+                                        <span className="truncate flex-1 cursor-pointer" onClick={() => toggleComplete(dStr, ev.id)}>
                                             {ev.text} {ev.tag === '수업' ? <span className="opacity-60 ml-0.5">({sessionMap[ev.id] || ''}차시)</span> : ''}
                                         </span>
-                                        <button onClick={(e) => { e.stopPropagation(); handleDelete(dStr, ev.id); }} className="opacity-0 group-hover/ev:opacity-100 no-drag text-red-400 hover:text-red-300 shrink-0 leading-none">×</button>
+                                        <button onClick={() => handleDelete(dStr, ev.id)} className="opacity-0 group-hover/ev:opacity-100 no-drag text-red-400 shrink-0">×</button>
                                     </div>
                                 ))}
                             </div>
@@ -296,17 +256,17 @@
             return (
                 <div style={{ backgroundColor: `${theme.bg}${opacity})` }} className="h-screen w-screen flex flex-col relative overflow-hidden border border-white/20">
                     
-                    {!fbConfig && (
-                        <div className="fixed inset-0 z-[300] bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
-                            <h2 className="text-2xl font-black text-white mb-6 tracking-tighter">바이브 캘린더 PRO</h2>
-                            <button onClick={()=>setShowSettings(true)} className="px-6 py-3 bg-blue-600 rounded-lg font-black text-white shadow-lg">연결 설정 시작하기</button>
-                        </div>
-                    )}
-
-                    {/* [UI 변경] 슬림하고 타이트한 상단 헤더 */}
+                    {/* 상단 1줄 슬림 헤더 */}
                     <div className="drag-area h-10 bg-black/60 border-b border-white/20 flex justify-between items-center px-4 shrink-0">
-                        <div className="text-sm font-bold text-white tracking-wider">
-                            {currentDate.getFullYear()}년 {currentDate.getMonth()+1}월
+                        <div className="flex items-center gap-3 no-drag">
+                            <span className="text-sm font-bold text-white">{currentDate.getFullYear()}년 {currentDate.getMonth()+1}월</span>
+                            
+                            {/* [업데이트] 필터 버튼 복구 */}
+                            <div className="flex bg-white/5 rounded p-0.5 gap-0.5">
+                                {['전체', ...TAGS].map(t => (
+                                    <button key={t} onClick={() => setFilterTag(t)} className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all ${filterTag === t ? 'bg-white/20 text-white' : 'text-white/30 hover:text-white/60'}`}>{t}</button>
+                                ))}
+                            </div>
                         </div>
                         
                         <div className="flex items-center gap-4 no-drag text-white">
@@ -314,67 +274,57 @@
                                 <input type="range" min="0.1" max="1" step="0.05" value={opacity} onChange={e => setOpacity(e.target.value)} className="w-16 h-1 bg-white/20 rounded-full cursor-pointer"/>
                                 <button onClick={() => setCurrentThemeIdx(p => (p+1)%THEMES.length)} className="text-[11px] font-bold opacity-60 hover:opacity-100">🎨 {theme.id}</button>
                             </div>
-                            
                             <div className="flex items-center bg-white/10 rounded text-[11px] overflow-hidden">
                                 <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1))} className="px-2.5 py-1 hover:bg-white/20 transition-colors">◀</button>
                                 <button onClick={() => setCurrentDate(new Date(today.getFullYear(), today.getMonth(), 1))} className="px-3 py-1 font-bold text-blue-300 hover:bg-white/20 transition-colors border-x border-white/10">오늘</button>
                                 <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1))} className="px-2.5 py-1 hover:bg-white/20 transition-colors">▶</button>
                             </div>
-
-                            {/* [UI 변경] 데스크탑에서도 상시 노출되는 설정 버튼 */}
-                            <button onClick={() => setShowSettings(true)} className="text-lg opacity-60 hover:opacity-100 transition-opacity p-1">⚙️</button>
+                            <button onClick={() => setShowSettings(true)} className="text-lg opacity-60 hover:opacity-100 p-1">⚙️</button>
                         </div>
                     </div>
 
-                    {/* [UI 변경] 여백 없는 직사각형 요일 헤더 */}
-                    <div className="grid grid-cols-7 border-b border-white/20 bg-black/40 no-drag shrink-0">
-                        {['일','월','화','수','목','금','토'].map((d, i) => (
-                            <div key={d} className={`text-center py-1.5 text-[11px] font-bold border-r border-white/10 ${i===0 ? 'text-red-400' : i===6 ? 'text-blue-400' : 'text-white/60'}`}>{d}</div>
-                        ))}
+                    <div className="grid grid-cols-7 border-b border-white/20 bg-black/40 shrink-0 no-drag">
+                        {['일','월','화','수','목','금','토'].map((d, i) => (<div key={d} className={`text-center py-1 text-[11px] font-bold border-r border-white/10 ${i===0 ? 'text-red-400' : i===6 ? 'text-blue-400' : 'text-white/60'}`}>{d}</div>))}
                     </div>
 
-                    {/* [UI 변경] 여백 없이 꽉 찬 그리드 뷰 */}
                     <div className="flex-1 overflow-y-auto custom-scrollbar no-drag">
-                        <div className="grid grid-cols-7 h-full auto-rows-[minmax(100px,1fr)]">
-                            {renderDays()}
-                        </div>
+                        <div className="grid grid-cols-7 h-full auto-rows-[minmax(100px,1fr)]"> {renderDays()} </div>
                     </div>
 
                     <div className="resize-handle no-drag" onPointerDown={handleResize}></div>
+
+                    {/* [업데이트] 오늘의 할 일 자동 팝업 */}
+                    {showTodayPopup && (
+                        <div className="fixed top-12 right-4 z-[200] w-64 bg-slate-900/95 border border-blue-500/50 rounded-xl shadow-2xl p-4 backdrop-blur-md no-drag">
+                            <div className="flex justify-between items-center mb-3">
+                                <h3 className="text-xs font-black text-blue-400">📅 오늘의 주요 일정</h3>
+                                <button onClick={() => setShowTodayPopup(false)} className="text-xs text-white/30 hover:text-white">닫기</button>
+                            </div>
+                            <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                                {(events[todayStr] || []).map(ev => (
+                                    <div key={ev.id} className="text-[11px] text-white/90 border-l-2 border-blue-500 pl-2 py-0.5">
+                                        {ev.text} {ev.tag === '수업' ? `(${sessionMap[ev.id] || ''}차시)` : ''}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* 일정 추가 모달 */}
                     {addingDate && (
                         <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 no-drag p-4 backdrop-blur-md">
                             <div className="bg-slate-900 p-8 rounded-2xl border border-white/20 w-full max-w-md shadow-2xl text-white">
-                                <div className="flex justify-between items-center mb-6">
-                                    <h3 className="text-xl font-bold text-blue-400">{addingDate}</h3>
-                                    <button onClick={() => setIsHolidayMode(!isHolidayMode)} className={`px-3 py-1.5 rounded text-[11px] font-bold border ${isHolidayMode ? 'bg-red-900/50 border-red-500/50 text-red-200' : 'border-white/20 text-white/50'}`}>{isHolidayMode ? '휴일 모드 활성' : '휴일 등록'}</button>
-                                </div>
-                                <input autoFocus value={inputText} onChange={e => setInputText(e.target.value)} className="w-full bg-black/50 border border-white/20 p-3 rounded-lg mb-6 outline-none focus:border-blue-500 text-sm text-white" placeholder={isHolidayMode ? "휴일 명칭" : "내용 입력"}/>
-                                
-                                {!isHolidayMode && (
-                                    <div className="space-y-6">
-                                        <div className="flex gap-2">
-                                            {TAGS.map(t => (
-                                                <button key={t} onClick={() => setSelectedTag(t)} className={`flex-1 py-2 rounded text-[11px] font-bold border ${selectedTag === t ? 'bg-white/10 border-white/40 text-white' : 'border-transparent bg-white/5 text-white/40'}`}>{t}</button>
-                                            ))}
-                                        </div>
-                                        <div className="bg-black/30 p-4 rounded-lg border border-white/10">
-                                            <div className="flex justify-between items-center mb-4">
-                                                <span className="text-[11px] font-bold text-white/50">종료일 (반복 안함 = 비움)</span>
-                                                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent outline-none text-xs font-bold text-white/80"/>
-                                            </div>
-                                            <div className="flex justify-between px-1">
-                                                {['일','월','화','수','목','금','토'].map((d, i) => (
-                                                    <label key={i} className="flex flex-col items-center gap-2 cursor-pointer">
-                                                        <span className={`text-[10px] font-bold ${repeatDays.includes(i) ? 'text-blue-400' : 'text-white/40'}`}>{d}</span>
-                                                        <input type="checkbox" checked={repeatDays.includes(i)} onChange={(e) => e.target.checked ? setRepeatDays([...repeatDays, i]) : setRepeatDays(repeatDays.filter(day => day !== i))} className="w-4 h-4 rounded shadow-inner accent-blue-500"/>
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
+                                <h3 className="text-xl font-bold text-blue-400 mb-6">{addingDate}</h3>
+                                <input autoFocus value={inputText} onChange={e => setInputText(e.target.value)} className="w-full bg-black/50 border border-white/20 p-3 rounded-lg mb-6 outline-none focus:border-blue-500 text-sm" placeholder="내용 입력"/>
+                                <div className="space-y-6">
+                                    <div className="flex gap-2">
+                                        {TAGS.map(t => (<button key={t} onClick={() => setSelectedTag(t)} className={`flex-1 py-2 rounded text-[11px] font-bold border ${selectedTag === t ? 'bg-white/10 border-white/40 text-white' : 'border-transparent bg-white/5 text-white/40'}`}>{t}</button>))}
                                     </div>
-                                )}
+                                    <div className="bg-black/30 p-4 rounded-lg border border-white/10">
+                                        <div className="flex justify-between items-center mb-4"><span className="text-[11px] font-bold text-white/50">반복 종료일</span><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent outline-none text-xs font-bold text-white/80"/></div>
+                                        <div className="flex justify-between px-1">{['일','월','화','수','목','금','토'].map((d, i) => (<label key={i} className="flex flex-col items-center gap-2 cursor-pointer"><span className={`text-[10px] font-bold ${repeatDays.includes(i) ? 'text-blue-400' : 'text-white/40'}`}>{d}</span><input type="checkbox" checked={repeatDays.includes(i)} onChange={(e) => e.target.checked ? setRepeatDays([...repeatDays, i]) : setRepeatDays(repeatDays.filter(day => day !== i))} className="w-4 h-4 rounded shadow-inner accent-blue-500"/></label>))}</div>
+                                    </div>
+                                </div>
                                 <div className="flex gap-3 mt-8">
                                     <button onClick={handleSave} className="flex-[2] py-3 bg-blue-600 rounded-lg font-bold text-white hover:bg-blue-500 text-sm">저장</button>
                                     <button onClick={() => setAddingDate(null)} className="flex-1 py-3 bg-white/10 rounded-lg text-white/60 font-bold hover:bg-white/20 text-sm">취소</button>
@@ -387,24 +337,22 @@
                     {showSettings && (
                         <div className="fixed inset-0 z-[310] bg-black/90 flex items-center justify-center p-6 no-drag backdrop-blur-md">
                             <div className="bg-slate-900 p-8 rounded-2xl border border-white/20 w-full max-w-lg shadow-2xl text-white">
-                                <h2 className="text-xl font-bold text-white mb-4">데이터 연결 설정</h2>
+                                <h2 className="text-xl font-bold mb-4">데이터 연결 확인 및 설정</h2>
+                                <p className="text-white/40 text-[11px] mb-4">현재 연결된 파이어베이스 코드입니다. 수정이 필요하면 덮어쓰세요.</p>
                                 <textarea 
                                     value={rawConfig}
                                     onChange={(e) => setRawConfig(e.target.value)}
-                                    placeholder={`const firebaseConfig = {\n  apiKey: "...",\n  projectId: "...",\n  ...\n};`}
+                                    placeholder="firebaseConfig 코드를 붙여넣으세요"
                                     className="w-full h-40 bg-black/50 border border-white/20 p-3 rounded-lg text-blue-200 text-xs font-mono mb-6 outline-none focus:border-blue-500 custom-scrollbar"
                                 />
                                 <div className="flex gap-3">
-                                    <button onClick={handleSmartConfigSave} className="flex-[2] py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-500 text-sm">연결 및 저장</button>
-                                    {fbConfig && <button onClick={() => setShowSettings(false)} className="flex-1 py-3 bg-white/10 text-white/60 font-bold rounded-lg hover:bg-white/20 text-sm">닫기</button>}
+                                    <button onClick={handleSmartConfigSave} className="flex-[2] py-3 bg-blue-600 text-white font-bold rounded-lg text-sm">연결 업데이트</button>
+                                    {fbConfig && <button onClick={() => setShowSettings(false)} className="flex-1 py-3 bg-white/10 text-white/60 font-bold rounded-lg text-sm">닫기</button>}
                                 </div>
-                                <div className="mt-8 pt-6 border-t border-white/10 flex items-center justify-between">
-                                    <span className="text-white/50 text-xs font-bold">{user ? `접속 계정: ${user.email || user.displayName || '익명'}` : '로그인되지 않음'}</span>
-                                    {user ? (
-                                        <button type="button" onClick={async () => { await window.FirebaseSDK.signOut(window.FirebaseSDK.getAuth()); window.location.reload(); }} className="text-xs font-bold text-red-400 hover:text-red-300 px-3 py-1.5 bg-white/5 rounded-lg border border-white/10">로그아웃</button>
-                                    ) : (
-                                        <button type="button" onClick={async () => { const { getAuth, signInWithPopup, GoogleAuthProvider } = window.FirebaseSDK; await signInWithPopup(getAuth(), new GoogleAuthProvider()); }} className="text-xs font-bold text-blue-400 hover:text-blue-300 px-3 py-1.5 bg-white/5 rounded-lg border border-white/10">구글 로그인</button>
-                                    )}
+                                <div className="mt-8 pt-6 border-t border-white/10 flex items-center justify-between text-xs font-bold">
+                                    <span className="text-white/50">{user ? `계정: ${user.email || '익명 접속'}` : '로그인 안됨'}</span>
+                                    {user ? (<button type="button" onClick={async () => { await window.FirebaseSDK.signOut(window.FirebaseSDK.getAuth()); window.location.reload(); }} className="text-red-400 border border-white/10 px-2 py-1 rounded">로그아웃</button>) 
+                                          : (<button type="button" onClick={async () => { const { getAuth, signInWithPopup, GoogleAuthProvider } = window.FirebaseSDK; await signInWithPopup(getAuth(), new GoogleAuthProvider()); }} className="text-blue-400 border border-white/10 px-2 py-1 rounded">구글 로그인</button>)}
                                 </div>
                             </div>
                         </div>
