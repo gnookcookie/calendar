@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>바이브 캘린더 Pro - 완전체 복구 버전</title>
+    <title>바이브 캘린더 Pro - 최종 최적화</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -56,34 +56,21 @@
             const [isHolidayMode, setIsHolidayMode] = useState(false);
             const [user, setUser] = useState(null);
 
-            // 드래그 애니메이션용 상태
+            // 스와이프 제스처 상태
             const [touchStartX, setTouchStartX] = useState(null);
             const [dragOffset, setDragOffset] = useState(0);
             const [isDragging, setIsDragging] = useState(false);
 
-            // 스마트 설정 파싱 상태
+            // 파이어베이스 통째로 붙여넣기 텍스트 상태
             const [rawConfig, setRawConfig] = useState('');
-            const [fbConfig, setFbConfig] = useState(null);
 
             const calendarRef = useRef(null);
             const isUpdatingRef = useRef(false);
 
             const isElectron = window.process && window.process.type === 'renderer';
+            const fbConfig = JSON.parse(localStorage.getItem('custom_firebase_config'));
             const theme = THEMES[currentThemeIdx];
             const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-
-            // [안전장치 복구] 앱 크래시 방지용 localStorage 로드
-            useEffect(() => {
-                try {
-                    const stored = localStorage.getItem('custom_firebase_config');
-                    if (stored) {
-                        setFbConfig(JSON.parse(stored));
-                    }
-                } catch(e) {
-                    localStorage.removeItem('custom_firebase_config');
-                    console.error("Config 파싱 오류", e);
-                }
-            }, []);
 
             useEffect(() => {
                 if (!isElectron) return;
@@ -97,31 +84,28 @@
                 return () => window.removeEventListener('mousemove', handleMove);
             }, []);
 
-            // 파이어베이스 연동 (안전하게 로드된 fbConfig 사용)
             useEffect(() => {
                 if (!fbConfig || !window.FirebaseSDK) return;
-                try {
-                    const { initializeApp, getAuth, onAuthStateChanged, signInAnonymously, getFirestore, collection, onSnapshot } = window.FirebaseSDK;
-                    const app = initializeApp(fbConfig);
-                    const auth = getAuth(app);
-                    const db = getFirestore(app);
+                const { initializeApp, getAuth, onAuthStateChanged, signInAnonymously, getFirestore, collection, onSnapshot } = window.FirebaseSDK;
+                const app = initializeApp(fbConfig);
+                const auth = getAuth(app);
+                const db = getFirestore(app);
 
-                    return onAuthStateChanged(auth, (u) => {
-                        setUser(u);
-                        if (u) {
-                            onSnapshot(collection(db, 'artifacts', fbConfig.appId, 'users', u.uid, 'days'), (snap) => {
-                                if (isUpdatingRef.current) return;
-                                const evs = {}; const hols = {};
-                                snap.forEach(doc => {
-                                    const data = doc.data();
-                                    evs[doc.id] = data.items || [];
-                                    if (data.holidayName) hols[doc.id] = data.holidayName;
-                                });
-                                setEvents(evs); setCustomHolidays(hols);
+                return onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    if (u) {
+                        onSnapshot(collection(db, 'artifacts', fbConfig.appId, 'users', u.uid, 'days'), (snap) => {
+                            if (isUpdatingRef.current) return;
+                            const evs = {}; const hols = {};
+                            snap.forEach(doc => {
+                                const data = doc.data();
+                                evs[doc.id] = data.items || [];
+                                if (data.holidayName) hols[doc.id] = data.holidayName;
                             });
-                        } else { signInAnonymously(auth).catch(()=>{}); }
-                    });
-                } catch(e) { console.error("Firebase 초기화 오류:", e); }
+                            setEvents(evs); setCustomHolidays(hols);
+                        });
+                    } else { signInAnonymously(auth).catch(()=>{}); }
+                });
             }, [fbConfig]);
 
             const sessionMap = useMemo(() => {
@@ -141,7 +125,7 @@
             }, [events]);
 
             const saveToDB = async (dateStr, data) => {
-                if (!user || !fbConfig) return;
+                if (!user) return;
                 const { getFirestore, doc, setDoc } = window.FirebaseSDK;
                 await setDoc(doc(getFirestore(), 'artifacts', fbConfig.appId, 'users', user.uid, 'days', dateStr), data, { merge: true });
             };
@@ -151,9 +135,8 @@
                 setTimeout(() => { isUpdatingRef.current = false; }, 2000); 
             };
 
-            // [로직 복구] 날아갔던 일정 저장 기능
             const handleSave = async () => {
-                if (!inputText || !user || !fbConfig) return;
+                if (!inputText || !user) return;
                 triggerUpdatingShield(); 
                 
                 const { getFirestore, doc, writeBatch } = window.FirebaseSDK;
@@ -189,7 +172,6 @@
                 try { await batch.commit(); } catch (e) { console.error(e); }
             };
 
-            // [로직 복구] 날아갔던 일정 삭제 기능
             const handleDelete = (dateStr, eventId) => {
                 triggerUpdatingShield();
                 const updatedItems = (events[dateStr] || []).filter(i => i.id !== eventId);
@@ -197,7 +179,6 @@
                 saveToDB(dateStr, { items: updatedItems }).catch(e => console.error(e));
             };
 
-            // [로직 복구] 날아갔던 일정 완료 기능
             const toggleComplete = (dateStr, eventId) => {
                 triggerUpdatingShield();
                 const updatedItems = (events[dateStr] || []).map(item => item.id === eventId ? { ...item, completed: !item.completed } : item);
@@ -205,7 +186,6 @@
                 saveToDB(dateStr, { items: updatedItems }).catch(e => console.error(e));
             };
 
-            // [로직 복구] 날아갔던 드래그 앤 드롭 기능
             const handleDragStart = (e, dateStr, item) => {
                 e.dataTransfer.setData("item", JSON.stringify(item));
                 e.dataTransfer.setData("fromDate", dateStr);
@@ -233,7 +213,7 @@
                 batch.commit().catch(e => console.error(e));
             };
 
-            // 스마트 붙여넣기 기능
+            // 스마트 붙여넣기 로직
             const handleSmartConfigSave = () => {
                 try {
                     const configObj = {};
@@ -255,7 +235,6 @@
                 }
             };
 
-            // 스와이프 기능
             const onTouchStart = (e) => {
                 setTouchStartX(e.targetTouches[0].clientX);
                 setIsDragging(true);
@@ -393,7 +372,6 @@
                             </div>
                         </div>
 
-                        {/* [로직 복구] 모바일 일정 확인 바텀 시트 */}
                         {selectedMobileDate && (
                             <div className="md:hidden fixed inset-0 z-50 bg-black/60 flex flex-col justify-end no-drag backdrop-blur-sm" onClick={() => setSelectedMobileDate(null)}>
                                 <div className="bg-slate-900 w-full rounded-t-3xl p-6 pb-12 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] border-t border-white/10" onClick={e => e.stopPropagation()}>
@@ -421,7 +399,6 @@
                             </div>
                         )}
 
-                        {/* [로직 복구] 일정/휴일 추가 모달 창 */}
                         {addingDate && (
                             <div className="absolute inset-0 bg-black/85 flex items-center justify-center z-50 no-drag p-4 backdrop-blur-xl">
                                 <div className="bg-slate-900 p-6 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-white/10 w-full max-w-lg shadow-2xl text-white max-h-[90vh] overflow-y-auto custom-scrollbar">
@@ -460,25 +437,26 @@
                             </div>
                         )}
 
-                        {/* 스마트 설정 모달 창 */}
                         {showSettings && (
-                            <div className="fixed inset-0 z-[310] bg-slate-900/95 flex items-center justify-center p-6 no-drag backdrop-blur-3xl">
-                                <div className="bg-slate-800 p-8 rounded-[2rem] border border-white/10 w-full max-w-xl shadow-2xl">
-                                    <h2 className="text-2xl font-black text-white mb-6">데이터 연결 설정</h2>
-                                    <p className="text-white/40 text-sm mb-4">파이어베이스에서 복사한 `firebaseConfig` 코드를 아래에 통째로 붙여넣으세요.</p>
+                            <div className="fixed inset-0 z-[310] bg-black/95 flex items-center justify-center p-4 no-drag">
+                                <div className="bg-slate-900 p-6 md:p-10 rounded-3xl border border-white/10 w-full max-w-lg shadow-2xl">
+                                    <h2 className="text-xl font-black text-white mb-6 flex justify-between items-center">설정 <button onClick={()=>setShowSettings(false)} className="text-xs opacity-30">닫기</button></h2>
+                                    <p className="text-white/40 text-sm mb-4">파이어베이스 코드 덩어리를 아래에 붙여넣으세요.</p>
                                     <textarea 
                                         value={rawConfig}
                                         onChange={(e) => setRawConfig(e.target.value)}
                                         placeholder={`const firebaseConfig = {\n  apiKey: "...",\n  projectId: "...",\n  ...\n};`}
-                                        className="w-full h-48 bg-black/40 border border-white/10 p-4 rounded-xl text-blue-300 text-xs font-mono mb-6 outline-none focus:border-blue-500 custom-scrollbar"
+                                        className="w-full h-48 bg-black/40 border border-white/10 p-3 rounded-xl text-white/80 text-xs font-mono mb-4 outline-none focus:border-blue-500 custom-scrollbar"
                                     />
-                                    <div className="flex gap-3">
-                                        <button onClick={handleSmartConfigSave} className="flex-1 py-4 bg-blue-600 text-white font-black rounded-xl shadow-lg hover:bg-blue-500">연결 및 저장</button>
-                                        {fbConfig && <button onClick={() => setShowSettings(false)} className="px-6 py-4 bg-white/5 text-white/40 font-black rounded-xl hover:text-white">닫기</button>}
-                                    </div>
-                                    <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-between">
-                                        <span className="text-white/30 text-xs font-bold">{user ? `접속 계정: ${user.email || '익명'}` : '로그인되지 않음'}</span>
-                                        {!user && <button onClick={async () => { const { getAuth, signInWithPopup, GoogleAuthProvider } = window.FirebaseSDK; await signInWithPopup(getAuth(), new GoogleAuthProvider()); }} className="text-xs text-blue-400 font-bold px-3 py-1 bg-white/5 rounded-lg">구글 로그인</button>}
+                                    <button onClick={handleSmartConfigSave} className="w-full py-4 bg-blue-600 rounded-xl font-black text-white shadow-lg">연결 및 저장</button>
+                                    
+                                    <div className="md:hidden mt-6 pt-4 border-t border-white/10 flex items-center justify-between">
+                                        <span className="text-white/80 text-sm font-bold">{user ? user.displayName : '비로그인'}</span>
+                                        {user ? (
+                                            <button type="button" onClick={async () => { await window.FirebaseSDK.signOut(window.FirebaseSDK.getAuth()); window.location.reload(); }} className="text-xs font-black text-red-400 px-3 py-1 bg-white/5 rounded-lg">로그아웃</button>
+                                        ) : (
+                                            <button type="button" onClick={async () => { const { getAuth, signInWithPopup, GoogleAuthProvider } = window.FirebaseSDK; await signInWithPopup(getAuth(), new GoogleAuthProvider()); }} className="text-xs font-black text-blue-400 px-3 py-1 bg-white/5 rounded-lg">로그인</button>
+                                        )}
                                     </div>
                                 </div>
                             </div>
